@@ -50,6 +50,7 @@ public:
     virtual uint64_t CurrentFrame() const override;
 
     virtual uint8_t CPUPeek(uint16_t addr) const override;
+    virtual void CPUPoke(uint16_t addr, uint8_t val) override;
     virtual uint8_t PPUPeek8(uint16_t addr) const override;
     virtual uint8_t OAMPeek8(uint8_t addr) const override;
     virtual uint8_t ScreenPeekPixel(int x, int y) const override;

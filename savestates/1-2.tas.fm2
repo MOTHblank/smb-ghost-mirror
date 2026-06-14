@@ -12,8 +12,7 @@ port1 0
 port2 0
 FDS 0
 NewPPU 0
-comment ghost-mirror TAS segment for 1-2, 1873 frames
-|0|........|||
+comment ghost-mirror TAS segment for 1-2, 1872 frames
 |0|........|||
 |0|........|||
 |0|........|||

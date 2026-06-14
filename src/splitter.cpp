@@ -161,9 +161,9 @@ int RunSplitter(const std::string& rom_path, const std::string& fm2_path,
             end = static_cast<int>(all_inputs.size());
         }
 
-        // Slice inputs
+        // Slice inputs starting from the frame AFTER the state was saved
         std::vector<sta::nes::ControllerState> segment(
-            all_inputs.begin() + start,
+            all_inputs.begin() + (start + 1 < end ? start + 1 : start),
             all_inputs.begin() + end
         );
 

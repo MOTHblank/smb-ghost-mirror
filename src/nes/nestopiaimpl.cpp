@@ -147,6 +147,12 @@ uint8_t NestopiaNESEmulator::CPUPeek(uint16_t addr) const {
     return static_cast<uint8_t>(cpu.Peek(static_cast<int>(addr)));
 }
 
+void NestopiaNESEmulator::CPUPoke(uint16_t addr, uint8_t val) {
+    Nes::Core::Machine& machine(const_cast<Nes::Api::Emulator&>(m_Emulator));
+    Nes::Core::Cpu& cpu = machine.cpu;
+    cpu.Poke(static_cast<unsigned int>(addr), static_cast<unsigned int>(val));
+}
+
 uint8_t NestopiaNESEmulator::PPUPeek8(uint16_t addr) const {
     Nes::Core::Machine& machine(const_cast<Nes::Api::Emulator&>(m_Emulator));
     Nes::Core::Ppu& ppu = machine.ppu;

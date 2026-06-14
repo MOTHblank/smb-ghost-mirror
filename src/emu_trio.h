@@ -22,6 +22,8 @@ struct EmuTrio {
 
     // Current frame index since level load
     int frame;
+    int pb_frame_idx;
+    int tas_frame_idx;
 
     // Cached screen frames (palette-indexed, 256x240)
     sta::nes::Frame player_frame;
@@ -54,7 +56,7 @@ struct EmuTrio {
     // Advance all three emus by one frame.
     // live_input goes to player emu; pb/tas get their next input from vectors.
     // Returns the live_input (for recording).
-    void StepFrame(sta::nes::ControllerState live_input);
+    void StepFrame(sta::nes::ControllerState live_input, bool step_pb = true, bool step_tas = true);
 
     // Read RAM from player emu
     uint8_t PlayerPeek(uint16_t address) const;

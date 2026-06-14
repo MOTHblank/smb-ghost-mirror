@@ -45,6 +45,8 @@ struct QuickSaveState {
     std::string pb_state;
     std::string tas_state;
     int frame = 0;
+    int pb_frame_idx = 0;
+    int tas_frame_idx = 0;
     std::vector<sta::nes::ControllerState> recorder_inputs;
     int recorder_frame_count = 0;
     bool recorder_active = false;
@@ -54,6 +56,9 @@ struct QuickSaveState {
 static QuickSaveState g_quicksave;
 static bool g_overlay_mode = false;
 static int g_max_level_x = 0;
+static bool g_reset_player_on_transition = true;
+static bool g_level_loading = false;
+static bool g_rom_loaded = false;
 
 static std::vector<int> SimulateGhostX(const std::string& rom_data, const std::string& start_state, const std::vector<sta::nes::ControllerState>& inputs) {
     std::vector<int> x_history;
@@ -194,18 +199,10 @@ int main(int argc, char* argv[]) {
     }
 
     EmuTrio trio;
-    if (!trio.LoadROM(g_rom_path)) {
-        SDL_ShowSimpleMessageBox(
-            SDL_MESSAGEBOX_ERROR,
-            "Ghost Mirror - ROM Load Error",
-            "Failed to load ROM.\n\nPlease place 'Super Mario Bros. (World).nes' in the same folder as the executable, or specify the path using: --rom <path>",
-            nullptr
-        );
-        fprintf(stderr, "ERROR: Failed to load ROM. Check --rom path.\n");
-        renderer.Shutdown();
-        ShutdownInput();
-        SDL_Quit();
-        return 1;
+    if (trio.LoadROM(g_rom_path)) {
+        g_rom_loaded = true;
+    } else {
+        fprintf(stderr, "WARNING: Default ROM not found ('%s'). Use the menu to select a ROM and split.\n", g_rom_path.c_str());
     }
 
     Recorder recorder;
@@ -235,6 +232,18 @@ int main(int argc, char* argv[]) {
     // Lambda: load a level by index
     auto LoadLevel = [&](int index) {
         if (index < 0 || index >= SavestateOrganizer::NUM_LEVELS) return false;
+
+        // If ROM isn't loaded yet, try loading the currently selected ROM
+        if (!g_rom_loaded) {
+            std::string selected_rom = rom_files[rom_file_idx];
+            if (trio.LoadROM(selected_rom)) {
+                g_rom_loaded = true;
+                g_rom_path = selected_rom;
+            } else {
+                printf("Cannot load level: no ROM loaded. Select a valid ROM in the menu.\n");
+                return false;
+            }
+        }
 
         g_quicksave.exists = false;
 
@@ -279,6 +288,7 @@ int main(int argc, char* argv[]) {
         prev_world = lvl.world;
         prev_level = lvl.level;
         was_in_gameplay = false;
+        g_level_loading = false;
 
         organizer.selected_index = index;
         menu_open = false;
@@ -379,6 +389,8 @@ int main(int argc, char* argv[]) {
                 trio.pb->SaveStateString(&g_quicksave.pb_state);
                 trio.tas->SaveStateString(&g_quicksave.tas_state);
                 g_quicksave.frame = trio.frame;
+                g_quicksave.pb_frame_idx = trio.pb_frame_idx;
+                g_quicksave.tas_frame_idx = trio.tas_frame_idx;
                 g_quicksave.recorder_inputs = recorder.inputs;
                 g_quicksave.recorder_frame_count = recorder.frame_count;
                 g_quicksave.recorder_active = recorder.active;
@@ -394,6 +406,8 @@ int main(int argc, char* argv[]) {
                     trio.pb->LoadStateString(g_quicksave.pb_state);
                     trio.tas->LoadStateString(g_quicksave.tas_state);
                     trio.frame = g_quicksave.frame;
+                    trio.pb_frame_idx = g_quicksave.pb_frame_idx;
+                    trio.tas_frame_idx = g_quicksave.tas_frame_idx;
                     
                     recorder.inputs = g_quicksave.recorder_inputs;
                     recorder.frame_count = g_quicksave.recorder_frame_count;
@@ -496,7 +510,9 @@ int main(int argc, char* argv[]) {
                     // Update paths and reload ROM
                     g_rom_path = new_rom;
                     g_fm2_path = new_fm2;
-                    trio.LoadROM(g_rom_path);
+                    if (trio.LoadROM(g_rom_path)) {
+                        g_rom_loaded = true;
+                    }
 
                     // Refresh organizer to find the newly generated states and TAS frames
                     organizer.Refresh();
@@ -507,6 +523,13 @@ int main(int argc, char* argv[]) {
                 } else {
                     printf("ERROR: Split failed.\n");
                 }
+            }
+            break;
+
+        case Hotkey::TOGGLE_RESET_PLAYER:
+            if (menu_open && menu_sub_state == MenuSubState::LEVEL_SELECT) {
+                g_reset_player_on_transition = !g_reset_player_on_transition;
+                printf("Toggled reset player on transition: %s\n", g_reset_player_on_transition ? "ON" : "OFF");
             }
             break;
 
@@ -572,7 +595,8 @@ int main(int argc, char* argv[]) {
                     best_frames,
                     tas_frames,
                     rom_files[rom_file_idx].c_str(),
-                    fm2_files[fm2_file_idx].c_str()
+                    fm2_files[fm2_file_idx].c_str(),
+                    g_reset_player_on_transition
                 );
             }
 
@@ -582,60 +606,128 @@ int main(int argc, char* argv[]) {
         }
 
         if (app_state == AppState::PLAYING) {
-            // Record and step all three emus
-            recorder.Append(input.controller);
-            trio.StepFrame(input.controller);
-
             // Check for level transition on player emu
             uint8_t oper_mode  = trio.PlayerPeek(OPER_MODE);
             uint8_t engine_sub = trio.PlayerPeek(GAME_ENGINE_SUB);
             uint8_t world      = trio.PlayerPeek(WORLD_NUMBER);
             uint8_t level      = trio.PlayerPeek(LEVEL_NUMBER);
 
-            bool in_gameplay = (oper_mode == 1 && engine_sub == 0);
+            bool now_in_gameplay = (oper_mode == 1 && engine_sub == 0);
 
-            if (in_gameplay && !was_in_gameplay &&
-                (world != prev_world || level != prev_level))
-            {
-                // Level transition detected — save PB for completed level
-                printf("Level transition detected: %d-%d → %d-%d\n",
-                       prev_world + 1, prev_level + 1, world + 1, level + 1);
-
-                recorder.Finish();
-                SavePB(false);
-
-                // Try to auto-load next level
+            // Level transition detection:
+            // We detect a transition if the world/level RAM variables change to a new route level
+            if (world != prev_world || level != prev_level) {
                 // Find the route index for the new world/level
+                int next_idx = -1;
                 for (int i = 0; i < SavestateOrganizer::NUM_LEVELS; i++) {
                     if (organizer.levels[i].world == world &&
                         organizer.levels[i].level == level)
                     {
-                        if (organizer.levels[i].has_state) {
-                            LoadLevel(i);
-                        }
+                        next_idx = i;
                         break;
                     }
                 }
 
-                prev_world = world;
-                prev_level = level;
+                if (next_idx >= 0 && organizer.levels[next_idx].has_state) {
+                    printf("Level transition detected: %d-%d → %d-%d\n",
+                           prev_world + 1, prev_level + 1, world + 1, level + 1);
+
+                    recorder.Finish();
+                    SavePB(false);
+
+                    if (g_reset_player_on_transition) {
+                        // Reset player directly to next level's start state (skips black screen)
+                        LoadLevel(next_idx);
+                    } else {
+                        // Play naturally. Retain player state, load PB/TAS ghosts level states and freeze them
+                        trio.pb->LoadStateFile(organizer.StatePath(next_idx));
+                        trio.tas->LoadStateFile(organizer.StatePath(next_idx));
+
+                        // Load ghost inputs
+                        trio.LoadPBInputs(organizer.PBPath(next_idx));
+                        trio.LoadTASInputs(organizer.TASPath(next_idx));
+
+                        // Sync IntervalTimerControl ($077F) and RNG registers ($07A7-$07AD) from TAS state to player
+                        uint8_t tas_timer = trio.tas->CPUPeek(0x077F);
+                        trio.player->CPUPoke(0x077F, tas_timer);
+                        for (uint16_t addr = 0x07A7; addr <= 0x07AD; addr++) {
+                            trio.player->CPUPoke(addr, trio.tas->CPUPeek(addr));
+                        }
+
+                        // Reset frame indices (trio.frame is player's frame, which stays 0 until gameplay starts)
+                        trio.frame = 0;
+                        trio.pb_frame_idx = 0;
+                        trio.tas_frame_idx = 0;
+
+                        g_level_loading = true;
+                        organizer.selected_index = next_idx;
+
+                        pb_x_history.clear();
+                        tas_x_history.clear();
+                        g_max_level_x = 0;
+
+                        printf("Natural transition: Loaded ghosts for %s. Waiting for player gameplay...\n", organizer.levels[next_idx].name);
+                    }
+
+                    prev_world = world;
+                    prev_level = level;
+                }
             }
 
-            was_in_gameplay = in_gameplay;
+            // If we are playing naturally and in loader screen, wait until active gameplay start to begin recording
+            if (g_level_loading) {
+                if (now_in_gameplay) {
+                    // Player has reached active gameplay! Start recording now.
+                    g_level_loading = false;
+
+                    std::string player_start_state;
+                    trio.player->SaveStateString(&player_start_state);
+                    recorder.Begin(organizer.levels[organizer.selected_index].name, player_start_state);
+
+                    // Precompute ghost X histories for HUD deltas starting from active gameplay frame 0
+                    if (!trio.pb_inputs.empty()) {
+                        pb_x_history = SimulateGhostX(trio.rom_data, player_start_state, trio.pb_inputs);
+                    }
+                    if (!trio.tas_inputs.empty()) {
+                        tas_x_history = SimulateGhostX(trio.rom_data, player_start_state, trio.tas_inputs);
+                    }
+
+                    g_max_level_x = 0;
+                    if (!tas_x_history.empty()) {
+                        g_max_level_x = tas_x_history.back();
+                    } else if (!pb_x_history.empty()) {
+                        g_max_level_x = pb_x_history.back();
+                    }
+
+                    printf("Gameplay started for %s! Ghosts and recorder active.\n", organizer.levels[organizer.selected_index].name);
+                }
+            }
+
+            // Step emulators and record player input
+            if (g_level_loading) {
+                // Hold ghosts, step player only
+                trio.StepFrame(input.controller, false, false);
+            } else {
+                // Gameplay active: step player (record input) and step ghosts
+                recorder.Append(input.controller);
+                trio.StepFrame(input.controller, true, true);
+            }
+
+            was_in_gameplay = now_in_gameplay;
 
             // Calculate Mario absolute X position and HUD deltas
             int player_x = (trio.player->CPUPeek(0x071A) * 256) + trio.player->CPUPeek(0x071C) + trio.player->CPUPeek(0x0086);
-            
+
             int pb_delta = 0;
             bool has_pb = !trio.pb_inputs.empty();
             if (has_pb) {
-                pb_delta = CalculateDelta(player_x, trio.frame, pb_x_history);
+                pb_delta = CalculateDelta(player_x, trio.pb_frame_idx, pb_x_history);
             }
 
             int tas_delta = 0;
             bool has_tas = !trio.tas_inputs.empty();
             if (has_tas) {
-                tas_delta = CalculateDelta(player_x, trio.frame, tas_x_history);
+                tas_delta = CalculateDelta(player_x, trio.tas_frame_idx, tas_x_history);
             }
 
             // Draw

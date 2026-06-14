@@ -69,6 +69,8 @@ bool EmuTrio::LoadStateString(const std::string& state_data) {
     }
 
     frame = 0;
+    pb_frame_idx = 0;
+    tas_frame_idx = 0;
     return true;
 }
 
@@ -120,21 +122,27 @@ void EmuTrio::ClearTASInputs() {
     tas_inputs.clear();
 }
 
-void EmuTrio::StepFrame(sta::nes::ControllerState live_input) {
+void EmuTrio::StepFrame(sta::nes::ControllerState live_input, bool step_pb, bool step_tas) {
     // 1. Player emu — live input
     player->Execute(live_input);
 
     // 2. PB emu — replay or freeze
-    if (frame < static_cast<int>(pb_inputs.size())) {
-        pb->Execute(pb_inputs[frame]);
+    if (step_pb) {
+        if (pb_frame_idx < static_cast<int>(pb_inputs.size())) {
+            pb->Execute(pb_inputs[pb_frame_idx]);
+            pb_frame_idx++;
+        }
     }
-    // else: frozen on last frame (don't execute)
+    // else: frozen (do not execute or advance index)
 
     // 3. TAS emu — replay or freeze
-    if (frame < static_cast<int>(tas_inputs.size())) {
-        tas->Execute(tas_inputs[frame]);
+    if (step_tas) {
+        if (tas_frame_idx < static_cast<int>(tas_inputs.size())) {
+            tas->Execute(tas_inputs[tas_frame_idx]);
+            tas_frame_idx++;
+        }
     }
-    // else: frozen on last frame
+    // else: frozen
 
     // 4. Capture screens
     player->ScreenPeekFrame(&player_frame);
@@ -150,4 +158,6 @@ uint8_t EmuTrio::PlayerPeek(uint16_t address) const {
 
 void EmuTrio::ResetFrame() {
     frame = 0;
+    pb_frame_idx = 0;
+    tas_frame_idx = 0;
 }

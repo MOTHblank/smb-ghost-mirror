@@ -241,6 +241,7 @@ InputState PollInput() {
             else if (event.key.keysym.scancode == SDL_SCANCODE_F)      state.hotkey = Hotkey::CYCLE_FM2;
             else if (event.key.keysym.scancode == SDL_SCANCODE_S)      state.hotkey = Hotkey::RUN_SPLIT;
             else if (event.key.keysym.scancode == SDL_SCANCODE_C)      state.hotkey = Hotkey::CONFIGURE_BINDINGS;
+            else if (event.key.keysym.scancode == SDL_SCANCODE_T)      state.hotkey = Hotkey::TOGGLE_RESET_PLAYER;
             break;
 
         case SDL_KEYUP:

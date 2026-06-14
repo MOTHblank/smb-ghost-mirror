@@ -33,6 +33,7 @@ enum class Hotkey {
     CYCLE_FM2,
     RUN_SPLIT,
     CONFIGURE_BINDINGS,
+    TOGGLE_RESET_PLAYER,
 };
 
 struct InputState {

@@ -474,7 +474,7 @@ void Renderer::DrawFrame(
 
 void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_levels,
                         const bool has_pb[], const bool has_tas[], const int best_frames[], const int tas_frames[],
-                        const char* current_rom, const char* current_fm2)
+                        const char* current_rom, const char* current_fm2, bool reset_player_on_transition)
 {
     // Semi-transparent overlay
     SDL_SetRenderDrawBlendMode(sdl_renderer, SDL_BLENDMODE_BLEND);
@@ -658,9 +658,10 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
     int sob_y = start_y + total_h + (scale == 1 ? 12 : 25);
     int hint_y = start_y + total_h + (scale == 1 ? 22 : 45);
     int hotkey_y = start_y + total_h + (scale == 1 ? 32 : 60);
-    int files_y1 = start_y + total_h + (scale == 1 ? 45 : 85);
-    int files_y2 = start_y + total_h + (scale == 1 ? 55 : 100);
-    int files_y3 = start_y + total_h + (scale == 1 ? 65 : 115);
+    int reset_player_y = start_y + total_h + (scale == 1 ? 42 : 75);
+    int files_y1 = start_y + total_h + (scale == 1 ? 52 : 92);
+    int files_y2 = start_y + total_h + (scale == 1 ? 62 : 107);
+    int files_y3 = start_y + total_h + (scale == 1 ? 72 : 122);
 
     // Draw Sum of Best (SOB) vs Sum of TAS (SOT)
     char sob_str[256];
@@ -709,6 +710,13 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
     } else {
         DrawText(hotkey_hint, (window_w - hotkey_w) / 2, hotkey_y, 1, hint_color);
     }
+
+    // Draw Reset Player toggle setting
+    SDL_Color toggle_color = reset_player_on_transition ? SDL_Color{ 180, 255, 180, 255 } : SDL_Color{ 255, 180, 180, 255 };
+    char reset_str[128];
+    snprintf(reset_str, sizeof(reset_str), "RESET PLAYER ON TRANSITION: %s (T to toggle)", reset_player_on_transition ? "ON" : "OFF");
+    int reset_w = static_cast<int>(strlen(reset_str)) * 8;
+    DrawText(reset_str, (window_w - reset_w) / 2, reset_player_y, 1, toggle_color);
 
     // Draw ROM & FM2 selection info
     SDL_Color file_label_color = { 100, 200, 255, 255 }; // cyan/light blue

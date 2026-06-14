@@ -164,6 +164,7 @@ public:
     // $4020 - $FFFF    Cartridge space (prg rom, prg ram, mapper registers)
     // #8000 - #FFFF    common rom
     virtual uint8_t CPUPeek(uint16_t address) const = 0;
+    virtual void CPUPoke(uint16_t address, uint8_t value) = 0;
     virtual void CPUPeekMult(uint16_t address, uint16_t cnt, uint8_t* out) const;
     virtual void CPUPeekRam(Ram* ram) const;
 

@@ -73,7 +73,7 @@ struct Renderer {
     // Draw the level selection overlay
     void DrawMenu(int selected_index, const char* level_names[], int num_levels,
                   const bool has_pb[], const bool has_tas[], const int best_frames[], const int tas_frames[],
-                  const char* current_rom, const char* current_fm2);
+                  const char* current_rom, const char* current_fm2, bool reset_player_on_transition);
 
     // Draw the bindings configuration overlay
     void DrawBindingsMenu(int selected_row, bool in_rebinding);
