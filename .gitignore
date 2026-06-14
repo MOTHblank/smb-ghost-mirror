@@ -1,0 +1,9 @@
+build/
+*.exe
+*.nes
+*.NES
+*.pb.fm2
+*.pb
+records.txt
+bindings.cfg
+3rd/
