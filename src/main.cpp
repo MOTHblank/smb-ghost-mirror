@@ -1,6 +1,7 @@
 // Ghost Mirror — Triple-Emulator Ghost Racing for SMB
 // Main entry point
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -84,24 +85,18 @@ static std::vector<int> SimulateGhostX(const std::string& rom_data, const std::s
     return x_history;
 }
 
-static int CalculateDelta(int player_x, int current_frame, const std::vector<int>& ghost_x_history) {
-    if (ghost_x_history.empty()) return 0;
-    
-    // Find the first frame where the ghost reached or exceeded player_x
-    int ghost_frame = -1;
-    for (size_t i = 0; i < ghost_x_history.size(); ++i) {
-        if (ghost_x_history[i] >= player_x) {
-            ghost_frame = static_cast<int>(i);
-            break;
-        }
+// Prefix maxima form a sorted index: binary search still works after backtracking.
+static std::vector<int> BuildReachIndex(std::vector<int> history) {
+    for (size_t i = 1; i < history.size(); ++i) {
+        history[i] = std::max(history[i], history[i - 1]);
     }
-    
-    if (ghost_frame == -1) {
-        // Player is further right than the ghost ever got
-        ghost_frame = static_cast<int>(ghost_x_history.size());
-    }
-    
-    return ghost_frame - current_frame;
+    return history;
+}
+
+static int CalculateDelta(int player_x, int current_frame, const std::vector<int>& reach_index) {
+    if (reach_index.empty()) return 0;
+    const auto reached = std::lower_bound(reach_index.begin(), reach_index.end(), player_x);
+    return static_cast<int>(reached - reach_index.begin()) - current_frame;
 }
 
 static void PrintUsage() {
@@ -206,6 +201,7 @@ int main(int argc, char* argv[]) {
     }
 
     Recorder recorder;
+    if (g_rom_loaded) recorder.SetROM(g_rom_path, trio.rom_data);
     SavestateOrganizer organizer;
     organizer.Init(g_savestates_dir);
 
@@ -239,6 +235,7 @@ int main(int argc, char* argv[]) {
             if (trio.LoadROM(selected_rom)) {
                 g_rom_loaded = true;
                 g_rom_path = selected_rom;
+                recorder.SetROM(g_rom_path, trio.rom_data);
             } else {
                 printf("Cannot load level: no ROM loaded. Select a valid ROM in the menu.\n");
                 return false;
@@ -270,11 +267,11 @@ int main(int argc, char* argv[]) {
         // Precompute ghost X position histories for HUD deltas
         pb_x_history.clear();
         if (!trio.pb_inputs.empty()) {
-            pb_x_history = SimulateGhostX(trio.rom_data, state_str, trio.pb_inputs);
+            pb_x_history = BuildReachIndex(SimulateGhostX(trio.rom_data, state_str, trio.pb_inputs));
         }
         tas_x_history.clear();
         if (!trio.tas_inputs.empty()) {
-            tas_x_history = SimulateGhostX(trio.rom_data, state_str, trio.tas_inputs);
+            tas_x_history = BuildReachIndex(SimulateGhostX(trio.rom_data, state_str, trio.tas_inputs));
         }
 
         g_max_level_x = 0;
@@ -308,12 +305,24 @@ int main(int argc, char* argv[]) {
         bool is_pb = organizer.levels[idx].best_frames < 0 ||
                      frames < organizer.levels[idx].best_frames;
 
-        if (is_pb || force) {
-            recorder.SaveFM2(organizer.PBPath(idx));
+        if (is_pb) {
+            if (!recorder.SaveFM2(organizer.PBPath(idx))) {
+                fprintf(stderr, "ERROR: PB replay could not be saved; record unchanged.\n");
+                return;
+            }
+            // The replay is authoritative. Refresh recovers it even if records.txt fails.
             organizer.UpdateBestTime(idx, frames);
             organizer.Refresh();
+        } else if (force) {
+            // Never replace the best replay with a slower manual recording.
+            const auto export_path = organizer.ExportPath(idx);
+            if (recorder.SaveFM2(export_path)) {
+                printf("Recording exported (PB unchanged): %s\n", export_path.c_str());
+            } else {
+                fprintf(stderr, "ERROR: Could not export recording.\n");
+            }
         } else {
-            printf("Not a PB (%d vs %d). Press F5 to force save.\n",
+            printf("Not a PB (%d vs %d). Press F8 to export this recording.\n",
                    frames, organizer.levels[idx].best_frames);
         }
     };
@@ -512,6 +521,7 @@ int main(int argc, char* argv[]) {
                     g_fm2_path = new_fm2;
                     if (trio.LoadROM(g_rom_path)) {
                         g_rom_loaded = true;
+                        recorder.SetROM(g_rom_path, trio.rom_data);
                     }
 
                     // Refresh organizer to find the newly generated states and TAS frames
@@ -686,10 +696,10 @@ int main(int argc, char* argv[]) {
 
                     // Precompute ghost X histories for HUD deltas starting from active gameplay frame 0
                     if (!trio.pb_inputs.empty()) {
-                        pb_x_history = SimulateGhostX(trio.rom_data, player_start_state, trio.pb_inputs);
+                        pb_x_history = BuildReachIndex(SimulateGhostX(trio.rom_data, player_start_state, trio.pb_inputs));
                     }
                     if (!trio.tas_inputs.empty()) {
-                        tas_x_history = SimulateGhostX(trio.rom_data, player_start_state, trio.tas_inputs);
+                        tas_x_history = BuildReachIndex(SimulateGhostX(trio.rom_data, player_start_state, trio.tas_inputs));
                     }
 
                     g_max_level_x = 0;

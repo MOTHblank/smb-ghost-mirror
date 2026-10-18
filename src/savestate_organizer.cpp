@@ -3,6 +3,7 @@
 #include <iostream>
 #include <sstream>
 #include <filesystem>
+#include "atomic_file.h"
 
 namespace fs = std::filesystem;
 
@@ -26,8 +27,8 @@ void SavestateOrganizer::Init(const std::string& savestates_dir) {
     // Ensure directory exists
     fs::create_directories(base_dir);
 
-    Refresh();
     LoadRecords();
+    Refresh();
 }
 
 static int CountFM2Frames(const std::string& filepath) {
@@ -40,15 +41,26 @@ static int CountFM2Frames(const std::string& filepath) {
             count++;
         }
     }
-    return count;
+    // WriteFM2File adds one synthetic initial input; ReadFM2File skips it.
+    return count > 1 ? count - 1 : -1;
 }
 
 void SavestateOrganizer::Refresh() {
+    bool records_changed = false;
     for (int i = 0; i < NUM_LEVELS; i++) {
         levels[i].has_state = fs::exists(StatePath(i));
         levels[i].has_pb    = fs::exists(PBPath(i));
         levels[i].has_tas   = fs::exists(TASPath(i));
         levels[i].tas_frames = CountFM2Frames(TASPath(i));
+        // The PB replay is the source of truth, not a potentially stale records.txt.
+        const int replay_frames = CountFM2Frames(PBPath(i));
+        if (levels[i].best_frames != replay_frames) {
+            levels[i].best_frames = replay_frames;
+            records_changed = true;
+        }
+    }
+    if (records_changed && !SaveRecords()) {
+        std::cerr << "WARNING: PB records cache could not be synchronized; replay files are intact" << std::endl;
     }
 }
 
@@ -58,6 +70,10 @@ std::string SavestateOrganizer::StatePath(int index) const {
 
 std::string SavestateOrganizer::PBPath(int index) const {
     return base_dir + "/" + levels[index].name + ".pb.fm2";
+}
+
+std::string SavestateOrganizer::ExportPath(int index) const {
+    return base_dir + "/" + levels[index].name + ".export.fm2";
 }
 
 std::string SavestateOrganizer::TASPath(int index) const {
@@ -88,7 +104,9 @@ void SavestateOrganizer::UpdateBestTime(int index, int frames) {
     if (index < 0 || index >= NUM_LEVELS) return;
     if (levels[index].best_frames < 0 || frames < levels[index].best_frames) {
         levels[index].best_frames = frames;
-        SaveRecords();
+        if (!SaveRecords()) {
+            std::cerr << "WARNING: Cannot update records.txt; the PB replay remains authoritative" << std::endl;
+        }
         std::cout << "New PB for " << levels[index].name << ": " << frames << " frames" << std::endl;
     }
 }
@@ -114,16 +132,12 @@ void SavestateOrganizer::LoadRecords() {
     }
 }
 
-void SavestateOrganizer::SaveRecords() {
-    std::ofstream ofs(RecordsPath());
-    if (!ofs) {
-        std::cerr << "WARNING: Cannot write records to " << RecordsPath() << std::endl;
-        return;
-    }
-
-    for (int i = 0; i < NUM_LEVELS; i++) {
-        if (levels[i].best_frames >= 0) {
-            ofs << levels[i].name << " " << levels[i].best_frames << "\n";
+bool SavestateOrganizer::SaveRecords() {
+    return AtomicWriteFile(RecordsPath(), [&](std::ostream& os) {
+        for (int i = 0; i < NUM_LEVELS; i++) {
+            if (levels[i].best_frames >= 0) {
+                os << levels[i].name << " " << levels[i].best_frames << "\n";
+            }
         }
-    }
+    });
 }

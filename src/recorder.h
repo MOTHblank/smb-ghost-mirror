@@ -14,6 +14,8 @@ struct Recorder {
     std::string level_start_state;  // Nestopia savestate at level load
     int frame_count;
     bool active;
+    sta::nes::FM2Header rom_header;
+    bool has_rom_header = false;
 
     Recorder();
 
@@ -23,7 +25,10 @@ struct Recorder {
     // Append one frame of input (called every StepFrame)
     void Append(sta::nes::ControllerState input);
 
-    // Save recorded inputs as FM2 to the given path
+    // Refresh header metadata from the actual loaded ROM.
+    bool SetROM(const std::string& rom_path, const std::string& rom_data);
+
+    // Atomically save recorded inputs as FM2 to the given path
     bool SaveFM2(const std::string& path) const;
 
     // Discard current recording (on death/reset)

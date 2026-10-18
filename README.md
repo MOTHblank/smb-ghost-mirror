@@ -40,7 +40,7 @@ This repository does not include third-party dependencies. Place them under `3rd
 | Start / Select | Enter / RShift | Start / Back |
 | Load level 1–8 | 1–8 | — |
 | Quicksave / Quickload | F5 / F9 | — |
-| Save PB | F8 | — |
+| Save PB / export recording | F8 | — |
 | Restart level | F10 | — |
 | Toggle overlay | Tab | — |
 | Menu | Esc | — |
@@ -48,6 +48,11 @@ This repository does not include third-party dependencies. Place them under `3rd
 | Cycle ROM / FM2 | R / F (in menu) | — |
 | Re-split | S (in menu) | — |
 | Toggle transition mode | T (in menu) | — |
+
+PBs are recorded automatically on completed levels. **F8** saves a faster recording as
+the new PB, or exports a slower recording to `savestates/<level>.export.fm2`
+without overwriting the PB. Replay files are written with an atomic replacement;
+`records.txt` is a repairable cache of the replay's frame count.
 
 ## Credits
 - Based on the [RetroTournaments/static](https://github.com/RetroTournaments/static) project.
