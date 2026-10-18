@@ -1,6 +1,8 @@
 #include "recorder.h"
 #include <fstream>
 #include <iostream>
+#include "atomic_file.h"
+#include "rom_metadata.h"
 
 Recorder::Recorder()
     : frame_count(0)
@@ -23,31 +25,36 @@ void Recorder::Append(sta::nes::ControllerState input) {
     frame_count++;
 }
 
+bool Recorder::SetROM(const std::string& rom_path, const std::string& rom_data) {
+    has_rom_header = MakeRomFM2Header(rom_path, rom_data, &rom_header);
+    if (!has_rom_header) std::cerr << "ERROR: Cannot compute FM2 metadata for ROM: " << rom_path << std::endl;
+    return has_rom_header;
+}
+
 bool Recorder::SaveFM2(const std::string& path) const {
     if (inputs.empty()) {
         std::cerr << "WARNING: No inputs to save" << std::endl;
         return false;
     }
 
-    std::ofstream ofs(path);
-    if (!ofs) {
-        std::cerr << "ERROR: Cannot open for writing: " << path << std::endl;
+    if (!has_rom_header) {
+        std::cerr << "ERROR: No valid ROM metadata; refusing to save misleading FM2" << std::endl;
         return false;
     }
-
-    sta::nes::FM2Header header = sta::nes::FM2Header::Defaults();
-    header.romFilename = "Super Mario Bros. (World)";
-    header.romChecksum = "base64:jjYwGG411HcjG/j9UOVM3Q==";
+    sta::nes::FM2Header header = rom_header;
 
     // Add ghost-mirror metadata as additional lines
     std::string comment = "comment ghost-mirror PB for " + level_id +
                           ", " + std::to_string(inputs.size()) + " frames";
     header.additionalLines.push_back(comment);
 
-    sta::nes::WriteFM2File(ofs, inputs, header);
-    ofs.close();
+    if (!AtomicWriteFile(path, [&](std::ostream& os) {
+        sta::nes::WriteFM2File(os, inputs, header);
+    })) {
+        return false;
+    }
 
-    std::cout << "PB saved: " << path << " (" << inputs.size() << " frames)" << std::endl;
+    std::cout << "FM2 saved: " << path << " (" << inputs.size() << " frames)" << std::endl;
     return true;
 }
 

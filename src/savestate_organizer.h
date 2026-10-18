@@ -35,6 +35,7 @@ struct SavestateOrganizer {
     // Get paths for a level
     std::string StatePath(int index) const;
     std::string PBPath(int index) const;
+    std::string ExportPath(int index) const;
     std::string TASPath(int index) const;
     std::string RecordsPath() const;
 
@@ -49,7 +50,7 @@ struct SavestateOrganizer {
 
     // Load/save records from/to records.txt
     void LoadRecords();
-    void SaveRecords();
+    bool SaveRecords();
 };
 
 #endif // GHOST_MIRROR_SAVESTATE_ORGANIZER_H
