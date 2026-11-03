@@ -6,6 +6,7 @@
 #include <string>
 #include "nes/nes.h"
 #include "nes/nestopiaimpl.h"
+#include "reference_profile.h"
 
 // Manages three Nestopia emulator instances running in lockstep.
 // - player: receives live input, is always recorded
@@ -46,8 +47,8 @@ struct EmuTrio {
     bool LoadStateString(const std::string& state_data);
 
     // Load FM2 input files for PB and TAS ghosts
-    bool LoadPBInputs(const std::string& fm2_path);
-    bool LoadTASInputs(const std::string& fm2_path);
+    bool LoadPBInputs(const std::string& fm2_path, const ReferenceProfile& profile, const std::string& stage);
+    bool LoadTASInputs(const std::string& fm2_path, const ReferenceProfile& profile, const std::string& stage);
 
     // Clear ghost inputs
     void ClearPBInputs();
