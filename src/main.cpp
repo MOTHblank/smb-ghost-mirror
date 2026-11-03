@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <optional>
 #include <memory>
+#include <utility>
+#include <cstdlib>
 #include <vector>
 
 #include <SDL.h>
@@ -35,7 +37,7 @@ static constexpr uint16_t LEVEL_NUMBER    = 0x075C;
 
 // Default paths (relative to exe)
 static std::string g_rom_path       = "Super Mario Bros. (World).nes";
-static std::string g_fm2_path       = "Maru_SMB1_RTARulesTASImprovement.fm2";
+static std::string g_fm2_path       = "maru.fm2";
 static std::string g_savestates_dir = "savestates";
 static std::string g_route_path = "routes/warpless.route";
 
@@ -670,8 +672,9 @@ int main(int argc, char* argv[]) {
                         g_rom_path = new_rom;
                         g_fm2_path = new_fm2;
                         recorder.SetROM(g_rom_path, trio.rom_data);
-                        LoadLevel(organizer.selected_index);
-                        printf("Split & Load Successful!\n");
+                        if (LoadLevel(organizer.selected_index))
+                            printf("Split & Load Successful!\n");
+                        else printf("Split completed; select a stage with a saved TAS state.\n");
                     } else {
                         g_rom_loaded = false;
                         level_active = false;
