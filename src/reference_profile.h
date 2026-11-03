@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
+#include <utility>
 #include <sstream>
 #include <stdexcept>
 #include <string>
