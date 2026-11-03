@@ -2,6 +2,7 @@
 #include "input.h"
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 
 Renderer::Renderer()
     : window(nullptr)
