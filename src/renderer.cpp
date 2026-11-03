@@ -474,7 +474,8 @@ void Renderer::DrawFrame(
 
 void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_levels,
                         const bool has_pb[], const bool has_tas[], const int best_frames[], const int tas_frames[],
-                        const char* current_rom, const char* current_fm2, bool reset_player_on_transition)
+                        const char* current_rom, const char* current_fm2, bool reset_player_on_transition,
+                        int checkpoint_slot, const char* route_name)
 {
     // Semi-transparent overlay
     SDL_SetRenderDrawBlendMode(sdl_renderer, SDL_BLENDMODE_BLEND);
@@ -488,12 +489,11 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
     int text_scale = (scale == 1) ? 1 : 2;
     int title_scale = (scale == 1) ? 2 : 3;
 
-    int cols = 8;
-    int rows = 1;
-    if (window_w < 600) { // Overlay mode
-        cols = 4;
-        rows = 2;
-    }
+    // Render a page of up to eight stages, even for custom routes with more stages.
+    const int page_start = (selected_index / 8) * 8;
+    const int visible = std::min(8, num_levels - page_start);
+    const int cols = std::min(visible, window_w < 600 ? 4 : 8);
+    const int rows = (visible + cols - 1) / cols;
 
     int total_w = cols * (box_w + padding) - padding;
     int total_h = rows * (box_h + padding) - padding;
@@ -502,7 +502,9 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
 
     // Draw SELECT LEVEL title
     SDL_Color title_color = { 255, 220, 100, 255 }; // gold
-    std::string title_text = "SELECT LEVEL";
+    std::string title_text = "SELECT LEVEL - " + std::string(route_name ? route_name : "") +
+        "  (" + std::to_string(selected_index / 8 + 1) + "/" +
+        std::to_string((num_levels + 7) / 8) + ")";
     int title_w = static_cast<int>(title_text.length()) * 8 * title_scale;
     DrawText(title_text, (window_w - title_w) / 2, start_y - (scale == 1 ? 30 : 60), title_scale, title_color);
 
@@ -522,9 +524,9 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
         }
     }
 
-    for (int i = 0; i < num_levels; i++) {
-        int r = i / cols;
-        int c = i % cols;
+    for (int i = page_start; i < page_start + visible; i++) {
+        int r = (i - page_start) / cols;
+        int c = (i - page_start) % cols;
         SDL_Rect box = {
             start_x + c * (box_w + padding),
             start_y + r * (box_h + padding),
@@ -735,7 +737,9 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
     char fm2_str[128];
     snprintf(rom_str, sizeof(rom_str), "ROM: [%s] (R to cycle)", rom_disp.c_str());
     snprintf(fm2_str, sizeof(fm2_str), "FM2: [%s] (F to cycle)", fm2_disp.c_str());
-    std::string split_str = "Press S to SPLIT & APPLY SELECTED REFERENCE";
+    std::string split_str = (window_w < 600 ? "S: APPLY | [ ]: SLOT " :
+        "S: SPLIT & APPLY REFERENCE | [ ]: CHECKPOINT SLOT ") +
+        std::to_string(checkpoint_slot) + "/5";
 
     int rom_w = static_cast<int>(strlen(rom_str)) * 8;
     int fm2_w = static_cast<int>(strlen(fm2_str)) * 8;
