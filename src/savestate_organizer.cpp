@@ -7,137 +7,113 @@
 
 namespace fs = std::filesystem;
 
-SavestateOrganizer::SavestateOrganizer()
-    : selected_index(0)
-{
-    // any% warpless route
-    levels[0] = { "1-1", 0, 0, false, false, false, -1, -1 };
-    levels[1] = { "1-2", 0, 1, false, false, false, -1, -1 };
-    levels[2] = { "4-1", 3, 0, false, false, false, -1, -1 };
-    levels[3] = { "4-2", 3, 1, false, false, false, -1, -1 };
-    levels[4] = { "8-1", 7, 0, false, false, false, -1, -1 };
-    levels[5] = { "8-2", 7, 1, false, false, false, -1, -1 };
-    levels[6] = { "8-3", 7, 2, false, false, false, -1, -1 };
-    levels[7] = { "8-4", 7, 3, false, false, false, -1, -1 };
+void SavestateOrganizer::Init(const RouteManifest& manifest) {
+    route = manifest;
+    levels.clear();
+    for (const auto& stage : route.stages) {
+        LevelInfo level;
+        level.name = stage.id;
+        level.world = stage.world;
+        level.level = stage.level;
+        level.state_file = stage.state_file;
+        level.tas_file = stage.tas_file;
+        level.pb_file = stage.pb_file;
+        levels.push_back(level);
+    }
+    selected_index = 0;
+    base_dir.clear();
+    active = false;
 }
 
-void SavestateOrganizer::Init(const std::string& savestates_dir) {
-    base_dir = savestates_dir;
-
-    // Ensure directory exists
-    fs::create_directories(base_dir);
-
+bool SavestateOrganizer::Activate(const ReferenceProfile& reference) {
+    if (!reference.IsConsistent()) {
+        std::cerr << "ERROR: Missing or incompatible profile marker; re-split the selected ROM/TAS\n";
+        return false;
+    }
+    const std::string old_stage = levels.empty() ? std::string() : SelectedLevel().name;
+    profile = reference;
+    base_dir = profile.directory;
+    active = true;
+    for (auto& level : levels) {
+        level.best_frames = -1;
+        level.tas_frames = -1;
+    }
+    const int previous_index = route.Find(old_stage);
+    selected_index = previous_index < 0 ? 0 : previous_index;
     LoadRecords();
     Refresh();
-}
-
-static int CountFM2Frames(const std::string& filepath) {
-    std::ifstream ifs(filepath);
-    if (!ifs) return -1;
-    std::string line;
-    int count = 0;
-    while (std::getline(ifs, line)) {
-        if (!line.empty() && line[0] == '|') {
-            count++;
-        }
-    }
-    // WriteFM2File adds one synthetic initial input; ReadFM2File skips it.
-    return count > 1 ? count - 1 : -1;
+    return true;
 }
 
 void SavestateOrganizer::Refresh() {
-    bool records_changed = false;
-    for (int i = 0; i < NUM_LEVELS; i++) {
-        levels[i].has_state = fs::exists(StatePath(i));
-        levels[i].has_pb    = fs::exists(PBPath(i));
-        levels[i].has_tas   = fs::exists(TASPath(i));
-        levels[i].tas_frames = CountFM2Frames(TASPath(i));
-        // The PB replay is the source of truth, not a potentially stale records.txt.
-        const int replay_frames = CountFM2Frames(PBPath(i));
-        if (levels[i].best_frames != replay_frames) {
-            levels[i].best_frames = replay_frames;
-            records_changed = true;
-        }
+    for (int i = 0; i < Count(); ++i) {
+        auto& level = levels[i];
+        level.has_state = Ready() && fs::exists(StatePath(i));
+        std::vector<sta::nes::ControllerState> replay;
+        level.has_tas = Ready() &&
+            GhostLoadTaggedReplay(TASPath(i), profile, level.name, &replay);
+        level.tas_frames = level.has_tas ? static_cast<int>(replay.size()) : -1;
+        replay.clear();
+        level.has_pb = Ready() &&
+            GhostLoadTaggedReplay(PBPath(i), profile, level.name, &replay);
+        level.best_frames = level.has_pb ? static_cast<int>(replay.size()) : -1;
     }
-    if (records_changed && !SaveRecords()) {
-        std::cerr << "WARNING: PB records cache could not be synchronized; replay files are intact" << std::endl;
+    if (Ready() && !SaveRecords()) {
+        std::cerr << "WARNING: PB records cache could not be synchronized\n";
     }
 }
 
 std::string SavestateOrganizer::StatePath(int index) const {
-    return base_dir + "/" + levels[index].name + ".state";
+    return (fs::path(base_dir) / levels.at(index).state_file).string();
 }
-
 std::string SavestateOrganizer::PBPath(int index) const {
-    return base_dir + "/" + levels[index].name + ".pb.fm2";
+    return (fs::path(base_dir) / levels.at(index).pb_file).string();
 }
-
 std::string SavestateOrganizer::ExportPath(int index) const {
-    return base_dir + "/" + levels[index].name + ".export.fm2";
+    return (fs::path(base_dir) / (levels.at(index).name + ".export.fm2")).string();
 }
-
+std::string SavestateOrganizer::PracticePath(int index) const {
+    return (fs::path(base_dir) / (levels.at(index).name + ".practice.fm2")).string();
+}
 std::string SavestateOrganizer::TASPath(int index) const {
-    return base_dir + "/" + levels[index].name + ".tas.fm2";
+    return (fs::path(base_dir) / levels.at(index).tas_file).string();
 }
-
 std::string SavestateOrganizer::RecordsPath() const {
-    return base_dir + "/records.txt";
+    return (fs::path(base_dir) / "records.txt").string();
 }
-
 void SavestateOrganizer::SelectNext() {
-    selected_index = (selected_index + 1) % NUM_LEVELS;
+    if (Count()) selected_index = (selected_index + 1) % Count();
 }
-
 void SavestateOrganizer::SelectPrev() {
-    selected_index = (selected_index + NUM_LEVELS - 1) % NUM_LEVELS;
+    if (Count()) selected_index = (selected_index + Count() - 1) % Count();
 }
-
-int SavestateOrganizer::SelectedIndex() const {
-    return selected_index;
-}
-
-const LevelInfo& SavestateOrganizer::SelectedLevel() const {
-    return levels[selected_index];
-}
+int SavestateOrganizer::SelectedIndex() const { return selected_index; }
+const LevelInfo& SavestateOrganizer::SelectedLevel() const { return levels.at(selected_index); }
 
 void SavestateOrganizer::UpdateBestTime(int index, int frames) {
-    if (index < 0 || index >= NUM_LEVELS) return;
+    if (!Ready() || index < 0 || index >= Count()) return;
     if (levels[index].best_frames < 0 || frames < levels[index].best_frames) {
         levels[index].best_frames = frames;
-        if (!SaveRecords()) {
-            std::cerr << "WARNING: Cannot update records.txt; the PB replay remains authoritative" << std::endl;
-        }
-        std::cout << "New PB for " << levels[index].name << ": " << frames << " frames" << std::endl;
+        if (!SaveRecords())
+            std::cerr << "WARNING: Cannot update records.txt; PB replay is authoritative\n";
+        std::cout << "New PB for " << levels[index].name << ": " << frames << " frames\n";
     }
 }
 
 void SavestateOrganizer::LoadRecords() {
+    if (!Ready()) return;
     std::ifstream ifs(RecordsPath());
-    if (!ifs) return;
-
-    std::string line;
-    while (std::getline(ifs, line)) {
-        // Format: "level_name frames"
-        std::istringstream iss(line);
-        std::string name;
-        int frames;
-        if (iss >> name >> frames) {
-            for (int i = 0; i < NUM_LEVELS; i++) {
-                if (name == levels[i].name) {
-                    levels[i].best_frames = frames;
-                    break;
-                }
-            }
-        }
+    std::string name;
+    int frames;
+    while (ifs >> name >> frames) {
+        for (auto& level : levels) if (name == level.name) level.best_frames = frames;
     }
 }
 
 bool SavestateOrganizer::SaveRecords() {
+    if (!Ready()) return false;
     return AtomicWriteFile(RecordsPath(), [&](std::ostream& os) {
-        for (int i = 0; i < NUM_LEVELS; i++) {
-            if (levels[i].best_frames >= 0) {
-                os << levels[i].name << " " << levels[i].best_frames << "\n";
-            }
-        }
+        for (const auto& level : levels)
+            if (level.best_frames >= 0) os << level.name << " " << level.best_frames << "\n";
     });
 }
