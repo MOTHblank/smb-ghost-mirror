@@ -5,6 +5,7 @@
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -138,6 +139,22 @@ struct RouteManifest {
         if (!SafeName(route.id) || route.stages.empty())
             throw std::runtime_error("Route requires an id and at least one stage");
         if (route.name.empty()) route.name = route.id;
+        // Reference filenames must be exclusive to one stage and role.
+        // This also prevents writing profile.txt, records.txt or practice exports.
+        std::set<std::string> assigned_files;
+        const auto has_suffix = [](const std::string& text, const std::string& suffix) {
+            return text.size() > suffix.size() &&
+                   text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+        };
+        for (const auto& stage : route.stages) {
+            if (!has_suffix(stage.state_file, ".state") ||
+                !has_suffix(stage.tas_file, ".tas.fm2") ||
+                !has_suffix(stage.pb_file, ".pb.fm2") ||
+                !assigned_files.insert(stage.state_file).second ||
+                !assigned_files.insert(stage.tas_file).second ||
+                !assigned_files.insert(stage.pb_file).second)
+                throw std::runtime_error("Invalid or duplicated route reference filename");
+        }
         for (const auto& link : route.shortcuts) {
             const int from = route.Find(link.first), to = route.Find(link.second);
             if (from < 0 || to <= from)
