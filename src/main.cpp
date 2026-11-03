@@ -8,6 +8,9 @@
 #include <chrono>
 #include <thread>
 #include <filesystem>
+#include <optional>
+#include <memory>
+#include <vector>
 
 #include <SDL.h>
 
@@ -16,10 +19,13 @@
 #include "renderer.h"
 #include "input.h"
 #include "savestate_organizer.h"
+#include "route_manifest.h"
+#include "reference_profile.h"
+#include "checkpoint_store.h"
 
 // Forward declaration from splitter.cpp
 int RunSplitter(const std::string& rom_path, const std::string& fm2_path,
-                const std::string& output_dir);
+                const RouteManifest& route, const ReferenceProfile& profile);
 
 // SMB RAM addresses
 static constexpr uint16_t OPER_MODE       = 0x0770;
@@ -31,6 +37,7 @@ static constexpr uint16_t LEVEL_NUMBER    = 0x075C;
 static std::string g_rom_path       = "Super Mario Bros. (World).nes";
 static std::string g_fm2_path       = "Maru_SMB1_RTARulesTASImprovement.fm2";
 static std::string g_savestates_dir = "savestates";
+static std::string g_route_path = "routes/warpless.route";
 
 // NES frame timing (~60.0988 Hz)
 static constexpr double NES_FPS = 39375000.0 / 655171.0;
@@ -104,6 +111,8 @@ static void PrintUsage() {
     printf("Options:\n");
     printf("  --split <rom> <fm2>   Split a full FM2 into per-level segments\n");
     printf("  --rom <path>          Path to SMB ROM (default: %s)\n", g_rom_path.c_str());
+    printf("  --fm2 <path>          TAS reference movie to select\n");
+    printf("  --route <path>        Route manifest (default: %s)\n", g_route_path.c_str());
     printf("  --savestates <dir>    Savestate directory (default: %s)\n", g_savestates_dir.c_str());
     printf("  --scale <2|3>         Window scale factor (default: 2)\n");
     printf("  --help                Show this help\n");
@@ -112,29 +121,42 @@ static void PrintUsage() {
 int main(int argc, char* argv[]) {
     int scale = 2;
 
-    // Parse arguments
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--split") == 0) {
-            if (i + 2 >= argc) {
-                fprintf(stderr, "ERROR: --split requires <rom> and <fm2> arguments\n");
-                return 1;
-            }
-            return RunSplitter(argv[i+1], argv[i+2], g_savestates_dir);
-        }
-        else if (strcmp(argv[i], "--rom") == 0 && i + 1 < argc) {
+    // Parse all options before running the splitter, regardless of argument order.
+    std::string split_rom, split_fm2;
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--split") == 0 && i + 2 < argc) {
+            split_rom = argv[++i];
+            split_fm2 = argv[++i];
+        } else if (strcmp(argv[i], "--rom") == 0 && i + 1 < argc) {
             g_rom_path = argv[++i];
-        }
-        else if (strcmp(argv[i], "--savestates") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--fm2") == 0 && i + 1 < argc) {
+            g_fm2_path = argv[++i];
+        } else if (strcmp(argv[i], "--route") == 0 && i + 1 < argc) {
+            g_route_path = argv[++i];
+        } else if (strcmp(argv[i], "--savestates") == 0 && i + 1 < argc) {
             g_savestates_dir = argv[++i];
-        }
-        else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
             scale = atoi(argv[++i]);
             if (scale < 1 || scale > 4) scale = 2;
-        }
-        else if (strcmp(argv[i], "--help") == 0) {
+        } else if (strcmp(argv[i], "--help") == 0) {
             PrintUsage();
             return 0;
+        } else {
+            fprintf(stderr, "ERROR: Unknown or incomplete argument: %s\n", argv[i]);
+            return 1;
         }
+    }
+
+    RouteManifest route;
+    try {
+        route = RouteManifest::Load(g_route_path);
+        if (!split_rom.empty()) {
+            ReferenceProfile profile = ReferenceProfile::Create(g_savestates_dir, split_rom, split_fm2, route);
+            return RunSplitter(split_rom, split_fm2, route, profile);
+        }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "ERROR: %s\n", e.what());
+        return 1;
     }
 
     // Discover ROM and FM2 files in the current directory
@@ -158,8 +180,10 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "WARNING: Directory scan failed: %s\n", e.what());
     }
 
-    if (rom_files.empty()) rom_files.push_back(g_rom_path);
-    if (fm2_files.empty()) fm2_files.push_back(g_fm2_path);
+    if (std::find(rom_files.begin(), rom_files.end(), g_rom_path) == rom_files.end())
+        rom_files.insert(rom_files.begin(), g_rom_path);
+    if (std::find(fm2_files.begin(), fm2_files.end(), g_fm2_path) == fm2_files.end())
+        fm2_files.insert(fm2_files.begin(), g_fm2_path);
 
     int rom_file_idx = 0;
     int fm2_file_idx = 0;
@@ -203,7 +227,20 @@ int main(int argc, char* argv[]) {
     Recorder recorder;
     if (g_rom_loaded) recorder.SetROM(g_rom_path, trio.rom_data);
     SavestateOrganizer organizer;
-    organizer.Init(g_savestates_dir);
+    organizer.Init(route);
+    std::optional<ReferenceProfile> active_profile;
+    auto ActivateProfile = [&](const ReferenceProfile& reference) {
+        if (!organizer.Activate(reference)) return false;
+        active_profile = reference;
+        recorder.profile_key = reference.key;
+        return true;
+    };
+    try {
+        const auto reference = ReferenceProfile::Create(g_savestates_dir, g_rom_path, g_fm2_path, route);
+        if (reference.IsConsistent()) ActivateProfile(reference);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "WARNING: No active reference profile yet: %s\n", e.what());
+    }
 
     AppState app_state = AppState::MENU;
     bool menu_open = true;
@@ -224,10 +261,17 @@ int main(int argc, char* argv[]) {
 
     std::vector<int> pb_x_history;
     std::vector<int> tas_x_history;
+    bool level_active = false;
+    int active_level_idx = 0;
+    bool run_assisted = false;
+    int checkpoint_slot = 1;
 
     // Lambda: load a level by index
     auto LoadLevel = [&](int index) {
-        if (index < 0 || index >= SavestateOrganizer::NUM_LEVELS) return false;
+        if (index < 0 || index >= organizer.Count() || !organizer.Ready()) {
+            fprintf(stderr, "No active compatible reference profile. Split/apply ROM and FM2 first.\n");
+            return false;
+        }
 
         // If ROM isn't loaded yet, try loading the currently selected ROM
         if (!g_rom_loaded) {
@@ -246,7 +290,7 @@ int main(int argc, char* argv[]) {
 
         const auto& lvl = organizer.levels[index];
         if (!lvl.has_state) {
-            printf("No savestate for %s. Run --split first.\n", lvl.name);
+            printf("No savestate for %s. Run --split first.\n", lvl.name.c_str());
             return false;
         }
 
@@ -256,8 +300,8 @@ int main(int argc, char* argv[]) {
         }
 
         // Load ghost inputs
-        trio.LoadPBInputs(organizer.PBPath(index));
-        trio.LoadTASInputs(organizer.TASPath(index));
+        trio.LoadPBInputs(organizer.PBPath(index), organizer.profile, lvl.name);
+        trio.LoadTASInputs(organizer.TASPath(index), organizer.profile, lvl.name);
 
         // Start recording
         std::string state_str;
@@ -288,17 +332,27 @@ int main(int argc, char* argv[]) {
         g_level_loading = false;
 
         organizer.selected_index = index;
+        active_level_idx = index;
+        level_active = true;
+        run_assisted = false;
         menu_open = false;
         app_state = AppState::PLAYING;
 
-        printf("Loaded level %s\n", lvl.name);
+        printf("Loaded level %s\n", lvl.name.c_str());
         return true;
     };
 
     // Lambda: save PB for current level
     auto SavePB = [&](bool force) {
-        int idx = organizer.selected_index;
+        if (!organizer.Ready() || !level_active) return;
+        int idx = active_level_idx;
         int frames = recorder.FrameCount();
+        if (run_assisted) {
+            if (force && recorder.SaveFM2(organizer.PracticePath(idx)))
+                printf("Checkpoint-assisted recording exported as PRACTICE ONLY.\n");
+            else printf("Checkpoint-assisted attempt is ineligible for PB.\n");
+            return;
+        }
 
         if (frames <= 0) return;
 
@@ -382,8 +436,11 @@ int main(int argc, char* argv[]) {
                 if (menu_sub_state == MenuSubState::BINDINGS_CONFIG) {
                     menu_sub_state = MenuSubState::LEVEL_SELECT;
                 } else {
-                    menu_open = false;
-                    app_state = AppState::PLAYING;
+                    menu_open = !level_active;
+                    if (level_active) {
+                        organizer.selected_index = active_level_idx;
+                        app_state = AppState::PLAYING;
+                    }
                 }
             } else {
                 menu_open = true;
@@ -462,7 +519,7 @@ int main(int argc, char* argv[]) {
         case Hotkey::RESTART_LEVEL:
             if (app_state == AppState::PLAYING) {
                 recorder.Discard();
-                LoadLevel(organizer.selected_index);
+                LoadLevel(active_level_idx);
             }
             break;
 
@@ -488,7 +545,11 @@ int main(int argc, char* argv[]) {
             if (menu_open) organizer.SelectNext();
             break;
         case Hotkey::MENU_CONFIRM:
-            if (menu_open) LoadLevel(organizer.SelectedIndex());
+            if (menu_open) {
+                if (rom_files[rom_file_idx] != g_rom_path || fm2_files[fm2_file_idx] != g_fm2_path)
+                    printf("ROM/FM2 selection pending. Press S to split and apply first.\n");
+                else LoadLevel(organizer.SelectedIndex());
+            }
             break;
 
         case Hotkey::CYCLE_ROM:
@@ -514,22 +575,27 @@ int main(int argc, char* argv[]) {
                 recorder.Discard();
 
                 // Run splitter
-                int split_res = RunSplitter(new_rom, new_fm2, g_savestates_dir);
+                int split_res = 1;
+                std::optional<ReferenceProfile> new_profile;
+                try {
+                    new_profile = ReferenceProfile::Create(g_savestates_dir, new_rom, new_fm2, route);
+                    split_res = RunSplitter(new_rom, new_fm2, route, *new_profile);
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "ERROR applying reference: %s\n", e.what());
+                }
                 if (split_res == 0) {
                     // Update paths and reload ROM
-                    g_rom_path = new_rom;
-                    g_fm2_path = new_fm2;
-                    if (trio.LoadROM(g_rom_path)) {
+                    if (trio.LoadROM(new_rom) && new_profile && ActivateProfile(*new_profile)) {
                         g_rom_loaded = true;
+                        g_rom_path = new_rom;
+                        g_fm2_path = new_fm2;
                         recorder.SetROM(g_rom_path, trio.rom_data);
+                        LoadLevel(organizer.selected_index);
+                        printf("Split & Load Successful!\n");
+                    } else {
+                        g_rom_loaded = false;
+                        fprintf(stderr, "ERROR: Split completed but profile could not be activated.\n");
                     }
-
-                    // Refresh organizer to find the newly generated states and TAS frames
-                    organizer.Refresh();
-
-                    // Reload the currently selected level segment using the new states/inputs
-                    LoadLevel(organizer.selected_index);
-                    printf("Split & Load Successful!\n");
                 } else {
                     printf("ERROR: Split failed.\n");
                 }
@@ -584,13 +650,13 @@ int main(int argc, char* argv[]) {
             }
             else {
                 // Draw menu
-                const char* names[SavestateOrganizer::NUM_LEVELS];
-                bool has_pb[SavestateOrganizer::NUM_LEVELS];
-                bool has_tas[SavestateOrganizer::NUM_LEVELS];
-                int best_frames[SavestateOrganizer::NUM_LEVELS];
-                int tas_frames[SavestateOrganizer::NUM_LEVELS];
-                for (int i = 0; i < SavestateOrganizer::NUM_LEVELS; i++) {
-                    names[i] = organizer.levels[i].name;
+                const int count = organizer.Count();
+                std::vector<const char*> names(count);
+                std::unique_ptr<bool[]> has_pb(new bool[count]);
+                std::unique_ptr<bool[]> has_tas(new bool[count]);
+                std::vector<int> best_frames(count), tas_frames(count);
+                for (int i = 0; i < count; ++i) {
+                    names[i] = organizer.levels[i].name.c_str();
                     has_pb[i] = organizer.levels[i].has_pb;
                     has_tas[i] = organizer.levels[i].has_tas;
                     best_frames[i] = organizer.levels[i].best_frames;
@@ -598,12 +664,12 @@ int main(int argc, char* argv[]) {
                 }
                 renderer.DrawMenu(
                     organizer.SelectedIndex(),
-                    names,
-                    SavestateOrganizer::NUM_LEVELS,
-                    has_pb,
-                    has_tas,
-                    best_frames,
-                    tas_frames,
+                    names.data(),
+                    count,
+                    has_pb.get(),
+                    has_tas.get(),
+                    best_frames.data(),
+                    tas_frames.data(),
                     rom_files[rom_file_idx].c_str(),
                     fm2_files[fm2_file_idx].c_str(),
                     g_reset_player_on_transition
@@ -629,7 +695,7 @@ int main(int argc, char* argv[]) {
             if (world != prev_world || level != prev_level) {
                 // Find the route index for the new world/level
                 int next_idx = -1;
-                for (int i = 0; i < SavestateOrganizer::NUM_LEVELS; i++) {
+                for (int i = 0; i < organizer.Count(); i++) {
                     if (organizer.levels[i].world == world &&
                         organizer.levels[i].level == level)
                     {
@@ -638,7 +704,9 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                if (next_idx >= 0 && organizer.levels[next_idx].has_state) {
+                if (next_idx >= 0 && next_idx != active_level_idx &&
+                    organizer.route.AllowsTransition(active_level_idx, next_idx) &&
+                    organizer.levels[next_idx].has_state) {
                     printf("Level transition detected: %d-%d → %d-%d\n",
                            prev_world + 1, prev_level + 1, world + 1, level + 1);
 
@@ -654,8 +722,8 @@ int main(int argc, char* argv[]) {
                         trio.tas->LoadStateFile(organizer.StatePath(next_idx));
 
                         // Load ghost inputs
-                        trio.LoadPBInputs(organizer.PBPath(next_idx));
-                        trio.LoadTASInputs(organizer.TASPath(next_idx));
+                        trio.LoadPBInputs(organizer.PBPath(next_idx), organizer.profile, organizer.levels[next_idx].name);
+                        trio.LoadTASInputs(organizer.TASPath(next_idx), organizer.profile, organizer.levels[next_idx].name);
 
                         // Sync IntervalTimerControl ($077F) and RNG registers ($07A7-$07AD) from TAS state to player
                         uint8_t tas_timer = trio.tas->CPUPeek(0x077F);
@@ -671,12 +739,13 @@ int main(int argc, char* argv[]) {
 
                         g_level_loading = true;
                         organizer.selected_index = next_idx;
+                        active_level_idx = next_idx;
 
                         pb_x_history.clear();
                         tas_x_history.clear();
                         g_max_level_x = 0;
 
-                        printf("Natural transition: Loaded ghosts for %s. Waiting for player gameplay...\n", organizer.levels[next_idx].name);
+                        printf("Natural transition: Loaded ghosts for %s. Waiting for player gameplay...\n", organizer.levels[next_idx].name.c_str());
                     }
 
                     prev_world = world;
@@ -692,7 +761,7 @@ int main(int argc, char* argv[]) {
 
                     std::string player_start_state;
                     trio.player->SaveStateString(&player_start_state);
-                    recorder.Begin(organizer.levels[organizer.selected_index].name, player_start_state);
+                    recorder.Begin(organizer.levels[active_level_idx].name, player_start_state);
 
                     // Precompute ghost X histories for HUD deltas starting from active gameplay frame 0
                     if (!trio.pb_inputs.empty()) {
@@ -709,7 +778,7 @@ int main(int argc, char* argv[]) {
                         g_max_level_x = pb_x_history.back();
                     }
 
-                    printf("Gameplay started for %s! Ghosts and recorder active.\n", organizer.levels[organizer.selected_index].name);
+                    printf("Gameplay started for %s! Ghosts and recorder active.\n", organizer.levels[active_level_idx].name.c_str());
                 }
             }
 
@@ -748,7 +817,7 @@ int main(int argc, char* argv[]) {
                 trio.frame,
                 static_cast<int>(trio.pb_inputs.size()),
                 static_cast<int>(trio.tas_inputs.size()),
-                organizer.levels[organizer.selected_index].name,
+                organizer.levels[active_level_idx].name.c_str(),
                 false,
                 pb_delta,
                 has_pb,
