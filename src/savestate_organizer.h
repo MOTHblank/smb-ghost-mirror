@@ -3,54 +3,49 @@
 
 #include <string>
 #include <vector>
-#include <array>
+#include "reference_profile.h"
+#include "route_manifest.h"
 
-// Manages the savestates/ directory and level selection for the any% route.
 struct LevelInfo {
-    const char* name;   // "1-1", "1-2", etc.
-    int world;          // 0-indexed (0=world 1, 3=world 4, 7=world 8)
-    int level;          // 0-indexed
-    bool has_state;     // .state file exists
-    bool has_pb;        // .pb.fm2 exists
-    bool has_tas;       // .tas.fm2 exists
-    int best_frames;    // best PB frame count (-1 if none)
-    int tas_frames;     // TAS frame count (-1 if none)
+    std::string name;
+    int world = 0;
+    int level = 0;
+    std::string state_file, tas_file, pb_file;
+    bool has_state = false;
+    bool has_pb = false;
+    bool has_tas = false;
+    int best_frames = -1;
+    int tas_frames = -1;
 };
 
+// A route-specific view of files belonging to exactly one validated ROM/TAS profile.
 struct SavestateOrganizer {
-    static constexpr int NUM_LEVELS = 8;
+    std::string base_dir;
+    ReferenceProfile profile;
+    RouteManifest route;
+    std::vector<LevelInfo> levels;
+    int selected_index = 0;
+    bool active = false;
 
-    std::string base_dir;  // path to savestates/ directory
-    std::array<LevelInfo, NUM_LEVELS> levels;
-    int selected_index;
-
-    SavestateOrganizer();
-
-    // Initialize with the base directory and scan for existing files
-    void Init(const std::string& savestates_dir);
-
-    // Rescan the directory for file existence
+    void Init(const RouteManifest& manifest);
+    bool Activate(const ReferenceProfile& reference);
     void Refresh();
+    int Count() const { return static_cast<int>(levels.size()); }
+    bool Ready() const { return active && profile.IsConsistent(); }
 
-    // Get paths for a level
     std::string StatePath(int index) const;
     std::string PBPath(int index) const;
     std::string ExportPath(int index) const;
+    std::string PracticePath(int index) const;
     std::string TASPath(int index) const;
     std::string RecordsPath() const;
-
-    // Level selection
     void SelectNext();
     void SelectPrev();
     int SelectedIndex() const;
     const LevelInfo& SelectedLevel() const;
-
-    // Update best time for a level
     void UpdateBestTime(int index, int frames);
-
-    // Load/save records from/to records.txt
     void LoadRecords();
     bool SaveRecords();
 };
 
-#endif // GHOST_MIRROR_SAVESTATE_ORGANIZER_H
+#endif
