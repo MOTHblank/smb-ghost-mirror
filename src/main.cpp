@@ -807,6 +807,11 @@ int main(int argc, char* argv[]) {
                             UpdateCaption();
                         }
                     } else {
+                        // Start a new stage's recording after gameplay resumes. Do not
+                        // preserve the completed stage's inputs in transition checkpoints.
+                        recorder.Discard();
+                        recorder.level_id = organizer.levels[next_idx].name;
+                        recorder.level_start_state.clear();
                         // Play naturally. Retain player state, load PB/TAS ghosts level states and freeze them
                         trio.pb->LoadStateFile(organizer.StatePath(next_idx));
                         trio.tas->LoadStateFile(organizer.StatePath(next_idx));
