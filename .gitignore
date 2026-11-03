@@ -7,3 +7,8 @@ build/
 records.txt
 bindings.cfg
 3rd/
+# Generated reference profiles include user-owned states, PBs and checkpoints.
+savestates/profiles/
+*.gmc
+*.practice.fm2
+*.export.fm2
