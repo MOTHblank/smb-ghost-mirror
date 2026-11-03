@@ -97,7 +97,7 @@ per page, with left/right navigation traversing the entire route. Number keys
 | A / B | Z / X | A / B |
 | Start / Select | Enter / Right Shift | Start / Back |
 | Load stage 1–8 | 1–8 | — |
-| Select checkpoint slot 1–5 | `[` / `]` | — |
+| Select checkpoint slot 1–5 | Ctrl+1–5 or `[` / `]` | — |
 | Save current checkpoint | F5 | Left shoulder |
 | Restore selected checkpoint | F9 | Right shoulder |
 | Export recording / eligible PB | F8 | Y |
@@ -111,7 +111,7 @@ per page, with left/right navigation traversing the entire route. Number keys
 
 The current checkpoint slot is visible in the window title and menu. Each
 stage has up to five persistent checkpoints **per profile**. Save with F5,
-cycle slots with the square brackets, and load with F9 while practicing a
+choose slots with Ctrl+1–5 or cycle with the square brackets, and load with F9 while practicing a
 stage; F9 can also load a selected stage's checkpoint from the stage menu.
 The checkpoint includes all three emulator states, frame counters, recorded
 inputs and level-transition synchronization state. Files are replaced
