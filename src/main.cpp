@@ -48,20 +48,6 @@ enum class AppState {
     PLAYING,
 };
 
-struct QuickSaveState {
-    std::string player_state;
-    std::string pb_state;
-    std::string tas_state;
-    int frame = 0;
-    int pb_frame_idx = 0;
-    int tas_frame_idx = 0;
-    std::vector<sta::nes::ControllerState> recorder_inputs;
-    int recorder_frame_count = 0;
-    bool recorder_active = false;
-    bool exists = false;
-};
-
-static QuickSaveState g_quicksave;
 static bool g_overlay_mode = false;
 static int g_max_level_x = 0;
 static bool g_reset_player_on_transition = true;
@@ -265,6 +251,12 @@ int main(int argc, char* argv[]) {
     int active_level_idx = 0;
     bool run_assisted = false;
     int checkpoint_slot = 1;
+    auto UpdateCaption = [&]() {
+        std::string caption = "Ghost Mirror | Checkpoint " + std::to_string(checkpoint_slot) +
+                              "/5" + (run_assisted ? " | PRACTICE (PB locked)" : "");
+        SDL_SetWindowTitle(renderer.window, caption.c_str());
+    };
+    UpdateCaption();
 
     // Lambda: load a level by index
     auto LoadLevel = [&](int index) {
@@ -286,7 +278,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        g_quicksave.exists = false;
 
         const auto& lvl = organizer.levels[index];
         if (!lvl.has_state) {
@@ -335,6 +326,7 @@ int main(int argc, char* argv[]) {
         active_level_idx = index;
         level_active = true;
         run_assisted = false;
+        UpdateCaption();
         menu_open = false;
         app_state = AppState::PLAYING;
 
@@ -450,46 +442,107 @@ int main(int argc, char* argv[]) {
             break;
 
         case Hotkey::QUICKSAVE:
-            if (app_state == AppState::PLAYING) {
-                trio.player->SaveStateString(&g_quicksave.player_state);
-                trio.pb->SaveStateString(&g_quicksave.pb_state);
-                trio.tas->SaveStateString(&g_quicksave.tas_state);
-                g_quicksave.frame = trio.frame;
-                g_quicksave.pb_frame_idx = trio.pb_frame_idx;
-                g_quicksave.tas_frame_idx = trio.tas_frame_idx;
-                g_quicksave.recorder_inputs = recorder.inputs;
-                g_quicksave.recorder_frame_count = recorder.frame_count;
-                g_quicksave.recorder_active = recorder.active;
-                g_quicksave.exists = true;
-                printf("Quicksaved at frame %d!\n", trio.frame);
+            if (app_state == AppState::PLAYING && level_active && organizer.Ready()) {
+                PracticeCheckpoint cp;
+                cp.profile_key = organizer.profile.key;
+                cp.stage = organizer.levels[active_level_idx].name;
+                trio.player->SaveStateString(&cp.player_state);
+                trio.pb->SaveStateString(&cp.pb_state);
+                trio.tas->SaveStateString(&cp.tas_state);
+                cp.frame = trio.frame;
+                cp.pb_frame = trio.pb_frame_idx;
+                cp.tas_frame = trio.tas_frame_idx;
+                cp.recorder_inputs = recorder.inputs;
+                cp.recorder_start_state = recorder.level_start_state;
+                cp.recorder_active = recorder.active;
+                cp.level_loading = g_level_loading;
+                cp.prev_world = prev_world;
+                cp.prev_level = prev_level;
+                if (CheckpointStore::Save(organizer.base_dir, checkpoint_slot, cp))
+                    printf("Checkpoint %d saved for %s at frame %d.\n",
+                           checkpoint_slot, cp.stage.c_str(), cp.frame);
+                else fprintf(stderr, "ERROR: Checkpoint save failed. Previous slot remains intact.\n");
             }
             break;
 
         case Hotkey::QUICKLOAD:
-            if (app_state == AppState::PLAYING) {
-                if (g_quicksave.exists) {
-                    trio.player->LoadStateString(g_quicksave.player_state);
-                    trio.pb->LoadStateString(g_quicksave.pb_state);
-                    trio.tas->LoadStateString(g_quicksave.tas_state);
-                    trio.frame = g_quicksave.frame;
-                    trio.pb_frame_idx = g_quicksave.pb_frame_idx;
-                    trio.tas_frame_idx = g_quicksave.tas_frame_idx;
-                    
-                    recorder.inputs = g_quicksave.recorder_inputs;
-                    recorder.frame_count = g_quicksave.recorder_frame_count;
-                    recorder.active = g_quicksave.recorder_active;
-
-                    // Update frames immediately to prevent visual glitch
-                    trio.player->ScreenPeekFrame(&trio.player_frame);
-                    trio.pb->ScreenPeekFrame(&trio.pb_frame);
-                    trio.tas->ScreenPeekFrame(&trio.tas_frame);
-
-                    printf("Quickloaded to frame %d!\n", trio.frame);
-                } else {
-                    recorder.Discard();
-                    LoadLevel(organizer.selected_index);
+            if (organizer.Ready() && (app_state == AppState::PLAYING || menu_open)) {
+                const int index = menu_open ? organizer.SelectedIndex() : active_level_idx;
+                PracticeCheckpoint cp;
+                if (!CheckpointStore::Load(organizer.base_dir, organizer.levels[index].name,
+                                           checkpoint_slot, organizer.profile.key, &cp)) {
+                    printf("No compatible checkpoint in slot %d for %s.\n",
+                           checkpoint_slot, organizer.levels[index].name.c_str());
+                    break;
                 }
+                // Validate all three states before modifying live emulators.
+                bool valid = true;
+                try {
+                    sta::nes::NestopiaNESEmulator probe;
+                    probe.LoadINESString(trio.rom_data);
+                    probe.LoadStateString(cp.player_state);
+                    probe.LoadStateString(cp.pb_state);
+                    probe.LoadStateString(cp.tas_state);
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "ERROR: Checkpoint validation failed: %s\n", e.what());
+                    valid = false;
+                }
+                if (!valid) break;
+                if ((menu_open || active_level_idx != index) && !LoadLevel(index)) break;
+                try {
+                    trio.player->LoadStateString(cp.player_state);
+                    trio.pb->LoadStateString(cp.pb_state);
+                    trio.tas->LoadStateString(cp.tas_state);
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "ERROR: Checkpoint restore failed: %s\n", e.what());
+                    LoadLevel(index);
+                    break;
+                }
+                trio.frame = cp.frame;
+                trio.pb_frame_idx = cp.pb_frame;
+                trio.tas_frame_idx = cp.tas_frame;
+                recorder.level_id = cp.stage;
+                recorder.level_start_state = cp.recorder_start_state;
+                recorder.inputs = std::move(cp.recorder_inputs);
+                recorder.frame_count = static_cast<int>(recorder.inputs.size());
+                recorder.active = cp.recorder_active;
+                prev_world = cp.prev_world;
+                prev_level = cp.prev_level;
+                g_level_loading = cp.level_loading;
+                was_in_gameplay = !g_level_loading;
+                pb_x_history.clear();
+                tas_x_history.clear();
+                if (!recorder.level_start_state.empty()) {
+                    if (!trio.pb_inputs.empty())
+                        pb_x_history = BuildReachIndex(SimulateGhostX(
+                            trio.rom_data, recorder.level_start_state, trio.pb_inputs));
+                    if (!trio.tas_inputs.empty())
+                        tas_x_history = BuildReachIndex(SimulateGhostX(
+                            trio.rom_data, recorder.level_start_state, trio.tas_inputs));
+                }
+                g_max_level_x = !tas_x_history.empty() ? tas_x_history.back() :
+                                (!pb_x_history.empty() ? pb_x_history.back() : 0);
+                trio.player->ScreenPeekFrame(&trio.player_frame);
+                trio.pb->ScreenPeekFrame(&trio.pb_frame);
+                trio.tas->ScreenPeekFrame(&trio.tas_frame);
+                run_assisted = true;
+                UpdateCaption();
+                printf("Restored PRACTICE checkpoint %d for %s at frame %d. PB disabled.\n",
+                       checkpoint_slot, cp.stage.c_str(), cp.frame);
             }
+            break;
+
+        case Hotkey::CHECKPOINT_PREV:
+            checkpoint_slot = (checkpoint_slot + CheckpointStore::SLOTS - 2) %
+                              CheckpointStore::SLOTS + 1;
+            printf("Practice checkpoint slot: %d/%d\n", checkpoint_slot, CheckpointStore::SLOTS);
+            UpdateCaption();
+            break;
+
+        case Hotkey::CHECKPOINT_NEXT:
+            checkpoint_slot = checkpoint_slot % CheckpointStore::SLOTS + 1;
+            printf("Practice checkpoint slot: %d/%d\n", checkpoint_slot, CheckpointStore::SLOTS);
+            UpdateCaption();
             break;
 
         case Hotkey::SAVE_PB:
@@ -571,8 +624,7 @@ int main(int argc, char* argv[]) {
                 printf("RE-SPLITTING! ROM: %s, FM2: %s...\n", new_rom.c_str(), new_fm2.c_str());
 
                 // Reset quicksave and discard current recorder
-                g_quicksave.exists = false;
-                recorder.Discard();
+                        recorder.Discard();
 
                 // Run splitter
                 int split_res = 1;
