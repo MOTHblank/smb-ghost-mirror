@@ -25,7 +25,12 @@ enum class Hotkey {
     LEVEL_5,        // F5+Shift or dedicated → 8-1 (we use number keys instead)
     LEVEL_6,        // 8-2
     LEVEL_7,        // 8-3
-    LEVEL_8,        // 8-4
+    LEVEL_8,        // eighth route stage
+    CHECKPOINT_SLOT_1, // Ctrl+1 through Ctrl+5
+    CHECKPOINT_SLOT_2,
+    CHECKPOINT_SLOT_3,
+    CHECKPOINT_SLOT_4,
+    CHECKPOINT_SLOT_5,
     MENU_UP,
     MENU_DOWN,
     MENU_LEFT,
