@@ -1,9 +1,4 @@
-// FM2 Segment Splitter
-// CLI mode: ghost-mirror --split <rom_path> <fm2_path>
-//
-// Runs Maru's full TAS through Nestopia from power-on, detects level transitions
-// by monitoring RAM, and saves per-level savestates + FM2 segments.
-
+// Route-driven FM2 segment splitter. Never writes outside the selected profile.
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -13,183 +8,121 @@
 
 #include "nes/nes.h"
 #include "nes/nestopiaimpl.h"
+#include "atomic_file.h"
+#include "route_manifest.h"
+#include "reference_profile.h"
 
-namespace fs = std::filesystem;
-
-// SMB RAM addresses for level detection
-static constexpr uint16_t OPER_MODE           = 0x0770;
-static constexpr uint16_t OPER_MODE_TASK      = 0x0772;
-static constexpr uint16_t GAME_ENGINE_SUB     = 0x000E;
-static constexpr uint16_t WORLD_NUMBER        = 0x075F;
-static constexpr uint16_t LEVEL_NUMBER        = 0x075C;
-static constexpr uint16_t INTERVAL_TIMER      = 0x077F;
-
-// The any% route levels (world, level) - 0-indexed
-struct RouteLevel {
-    int world;
-    int level;
-    const char* name;
-};
-
-static const RouteLevel ROUTE[] = {
-    { 0, 0, "1-1" },
-    { 0, 1, "1-2" },
-    { 3, 0, "4-1" },
-    { 3, 1, "4-2" },
-    { 7, 0, "8-1" },
-    { 7, 1, "8-2" },
-    { 7, 2, "8-3" },
-    { 7, 3, "8-4" },
-};
-static constexpr int NUM_ROUTE_LEVELS = 8;
-
-// Check if current world/level matches a route level
-static int FindRouteIndex(int world, int level) {
-    for (int i = 0; i < NUM_ROUTE_LEVELS; i++) {
-        if (ROUTE[i].world == world && ROUTE[i].level == level) {
-            return i;
-        }
-    }
-    return -1;
-}
+static constexpr uint16_t OPER_MODE = 0x0770;
+static constexpr uint16_t GAME_ENGINE_SUB = 0x000E;
+static constexpr uint16_t WORLD_NUMBER = 0x075F;
+static constexpr uint16_t LEVEL_NUMBER = 0x075C;
 
 int RunSplitter(const std::string& rom_path, const std::string& fm2_path,
-                const std::string& output_dir)
+                const RouteManifest& route, const ReferenceProfile& profile)
 {
-    std::cout << "=== Ghost Mirror FM2 Splitter ===" << std::endl;
-    std::cout << "ROM:    " << rom_path << std::endl;
-    std::cout << "FM2:    " << fm2_path << std::endl;
-    std::cout << "Output: " << output_dir << std::endl;
+    std::cout << "=== Ghost Mirror FM2 Splitter: " << route.name << " ===\n"
+              << "ROM: " << rom_path << "\nFM2: " << fm2_path
+              << "\nProfile: " << profile.directory << std::endl;
 
-    // Load FM2
-    std::ifstream fm2_ifs(fm2_path);
-    if (!fm2_ifs) {
+    std::ifstream fm2(fm2_path);
+    if (!fm2) {
         std::cerr << "ERROR: Cannot open FM2: " << fm2_path << std::endl;
         return 1;
     }
-
-    std::vector<sta::nes::ControllerState> all_inputs;
+    std::vector<sta::nes::ControllerState> inputs;
     sta::nes::FM2Header header;
     try {
-        sta::nes::ReadFM2File(fm2_ifs, &all_inputs, &header);
+        sta::nes::ReadFM2File(fm2, &inputs, &header);
     } catch (const std::exception& e) {
-        std::cerr << "ERROR: Failed to parse FM2: " << e.what() << std::endl;
+        std::cerr << "ERROR: Cannot parse FM2: " << e.what() << std::endl;
         return 1;
     }
-    fm2_ifs.close();
-    std::cout << "FM2 loaded: " << all_inputs.size() << " frames" << std::endl;
-
-    // Create emulator and load ROM
+    if (header.romChecksum != profile.rom_checksum || inputs.empty()) {
+        std::cerr << "ERROR: Empty movie or ROM checksum mismatch; refusing split\n";
+        return 1;
+    }
     sta::nes::NestopiaNESEmulator emu;
-    try {
-        emu.LoadINESFile(rom_path);
-    } catch (const std::exception& e) {
-        std::cerr << "ERROR: Failed to load ROM: " << e.what() << std::endl;
+    try { emu.LoadINESFile(rom_path); }
+    catch (const std::exception& e) {
+        std::cerr << "ERROR: Cannot load ROM: " << e.what() << std::endl;
+        return 1;
+    }
+    if (!profile.Prepare()) {
+        std::cerr << "ERROR: Reference profile cannot be safely initialized\n";
         return 1;
     }
 
-    // Ensure output directory exists
-    fs::create_directories(output_dir);
-
-    // Run frame-by-frame and detect transitions
-    int prev_world = -1;
-    int prev_level = -1;
-    int current_route = -1;
-    int level_start_frame = 0;
+    std::vector<bool> saved(route.stages.size(), false);
+    std::vector<int> start_frames(route.stages.size(), 0);
     bool in_gameplay = false;
+    int last_index = -1;
+    int count = 0;
 
-    // Track which levels we've saved states for
-    bool saved[NUM_ROUTE_LEVELS] = {};
-    int level_start_frames[NUM_ROUTE_LEVELS] = {};
-
-    std::cout << "Running emulation..." << std::endl;
-
-    for (int f = 0; f < static_cast<int>(all_inputs.size()); f++) {
-        emu.Execute(all_inputs[f]);
-
-        uint8_t oper_mode    = emu.CPUPeek(OPER_MODE);
-        uint8_t engine_sub   = emu.CPUPeek(GAME_ENGINE_SUB);
-        uint8_t world        = emu.CPUPeek(WORLD_NUMBER);
-        uint8_t level        = emu.CPUPeek(LEVEL_NUMBER);
-
-        // Detect gameplay start: oper_mode == 1, engine_sub transitions to 0
-        bool now_in_gameplay = (oper_mode == 1 && engine_sub == 0);
-
-        if (now_in_gameplay && !in_gameplay) {
-            // Transition into gameplay
-            int route_idx = FindRouteIndex(world, level);
-
-            if (route_idx >= 0 && !saved[route_idx]) {
-                std::cout << "Level " << ROUTE[route_idx].name
-                          << " started at frame " << f << std::endl;
-
-                // Save the current state
-                std::string state_path = output_dir + "/" + ROUTE[route_idx].name + ".state";
-                try {
-                    emu.SaveStateFile(state_path);
-                    std::cout << "  Saved state: " << state_path << std::endl;
-                } catch (const std::exception& e) {
-                    std::cerr << "  ERROR saving state: " << e.what() << std::endl;
+    for (size_t frame = 0; frame < inputs.size(); ++frame) {
+        emu.Execute(inputs[frame]);
+        const bool playing = emu.CPUPeek(OPER_MODE) == 1 &&
+                             emu.CPUPeek(GAME_ENGINE_SUB) == 0;
+        if (playing && !in_gameplay) {
+            const int index = route.Find(emu.CPUPeek(WORLD_NUMBER),
+                                         emu.CPUPeek(LEVEL_NUMBER));
+            if (index >= 0 && !saved[index]) {
+                if (last_index >= 0 && !route.AllowsTransition(last_index, index)) {
+                    std::cerr << "WARNING: Skipping unexpected stage transition to "
+                              << route.stages[index].id << "\n";
+                } else {
+                    const auto path = (std::filesystem::path(profile.directory) /
+                                       route.stages[index].state_file).string();
+                    std::string state;
+                    emu.SaveStateString(&state);
+                    if (!AtomicWriteFile(path, [&](std::ostream& out) {
+                        out.write(state.data(), static_cast<std::streamsize>(state.size()));
+                    })) return 1;
+                    saved[index] = true;
+                    start_frames[index] = static_cast<int>(frame);
+                    last_index = index;
+                    ++count;
+                    std::cout << "  " << route.stages[index].id << " at frame "
+                              << frame << "\n";
                 }
-
-                saved[route_idx] = true;
-                level_start_frames[route_idx] = f;
             }
-
-            prev_world = world;
-            prev_level = level;
         }
-
-        in_gameplay = now_in_gameplay;
+        in_gameplay = playing;
+    }
+    if (count == 0) {
+        std::cerr << "ERROR: No route stages detected in the selected FM2\n";
+        return 1;
     }
 
-    // Now extract FM2 segments for each saved level
-    std::cout << "\nExtracting FM2 segments..." << std::endl;
-    for (int i = 0; i < NUM_ROUTE_LEVELS; i++) {
+    for (size_t i = 0; i < route.stages.size(); ++i) {
         if (!saved[i]) {
-            std::cerr << "WARNING: Level " << ROUTE[i].name << " not found in FM2" << std::endl;
+            std::cerr << "WARNING: No segment for " << route.stages[i].id << "\n";
             continue;
         }
-
-        int start = level_start_frames[i];
-        int end;
-
-        // Find the start of the next level (or end of inputs)
-        if (i + 1 < NUM_ROUTE_LEVELS && saved[i + 1]) {
-            end = level_start_frames[i + 1];
-        } else {
-            end = static_cast<int>(all_inputs.size());
+        const int begin = start_frames[i];
+        int end = static_cast<int>(inputs.size());
+        for (size_t next = i + 1; next < route.stages.size(); ++next) {
+            if (saved[next]) { end = start_frames[next]; break; }
         }
+        if (end <= begin) continue;
+        const std::vector<sta::nes::ControllerState> segment(
+            inputs.begin() + begin + 1, inputs.begin() + end);
+        if (segment.empty()) continue;
 
-        // Slice inputs starting from the frame AFTER the state was saved
-        std::vector<sta::nes::ControllerState> segment(
-            all_inputs.begin() + (start + 1 < end ? start + 1 : start),
-            all_inputs.begin() + end
-        );
-
-        // Write FM2 segment
-        std::string fm2_out = output_dir + "/" + ROUTE[i].name + ".tas.fm2";
-        std::ofstream ofs(fm2_out);
-        if (!ofs) {
-            std::cerr << "ERROR: Cannot write: " << fm2_out << std::endl;
-            continue;
-        }
-
-        sta::nes::FM2Header seg_header = sta::nes::FM2Header::Defaults();
-        seg_header.romFilename = header.romFilename;
-        seg_header.romChecksum = header.romChecksum;
-        std::string comment = "comment ghost-mirror TAS segment for " +
-                              std::string(ROUTE[i].name) + ", " +
-                              std::to_string(segment.size()) + " frames";
-        seg_header.additionalLines.push_back(comment);
-
-        sta::nes::WriteFM2File(ofs, segment, seg_header);
-        ofs.close();
-
-        std::cout << "  " << ROUTE[i].name << ": " << segment.size()
-                  << " frames → " << fm2_out << std::endl;
+        sta::nes::FM2Header segment_header = sta::nes::FM2Header::Defaults();
+        segment_header.romFilename = header.romFilename;
+        segment_header.romChecksum = profile.rom_checksum;
+        segment_header.additionalLines.push_back(GhostProfileTag(profile.key));
+        segment_header.additionalLines.push_back(GhostStageTag(route.stages[i].id));
+        segment_header.additionalLines.push_back(
+            "comment ghost-mirror TAS segment " + std::to_string(segment.size()) + " frames");
+        const auto path = (std::filesystem::path(profile.directory) /
+                           route.stages[i].tas_file).string();
+        if (!AtomicWriteFile(path, [&](std::ostream& out) {
+            sta::nes::WriteFM2File(out, segment, segment_header);
+        })) return 1;
+        std::cout << "  " << route.stages[i].id << ": " << segment.size()
+                  << " frames -> " << path << "\n";
     }
-
-    std::cout << "\nSplitter done!" << std::endl;
+    std::cout << "Splitter finished in profile " << profile.directory << std::endl;
     return 0;
 }
