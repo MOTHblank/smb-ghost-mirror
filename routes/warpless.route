@@ -1,0 +1,15 @@
+# Default Super Mario Bros. Any% Warpless practice route.
+# stage=id,world,level[,state_filename,tas_filename,pb_filename]
+# World/level values are 1-based. Files live inside the matching reference profile.
+id=warpless
+name=SMB1 Any% Warpless
+stage=1-1,1,1
+stage=1-2,1,2
+stage=4-1,4,1
+stage=4-2,4,2
+stage=8-1,8,1
+stage=8-2,8,2
+stage=8-3,8,3
+stage=8-4,8,4
+shortcut=1-2,4-1
+shortcut=4-2,8-1
