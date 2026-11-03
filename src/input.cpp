@@ -227,6 +227,14 @@ InputState PollInput() {
             else if (event.key.keysym.scancode == SDL_SCANCODE_LEFTBRACKET) state.hotkey = Hotkey::CHECKPOINT_PREV;
             else if (event.key.keysym.scancode == SDL_SCANCODE_RIGHTBRACKET) state.hotkey = Hotkey::CHECKPOINT_NEXT;
 
+            // Ctrl+1..5 selects persistent checkpoint slots without stealing stage hotkeys.
+            else if ((event.key.keysym.mod & KMOD_CTRL) != 0 &&
+                     event.key.keysym.scancode >= SDL_SCANCODE_1 &&
+                     event.key.keysym.scancode <= SDL_SCANCODE_5) {
+                state.hotkey = static_cast<Hotkey>(
+                    static_cast<int>(Hotkey::CHECKPOINT_SLOT_1) +
+                    (event.key.keysym.scancode - SDL_SCANCODE_1));
+            }
             // Level quick-jump (1-8 keys)
             else if (event.key.keysym.scancode == SDL_SCANCODE_1)      state.hotkey = Hotkey::LEVEL_1;
             else if (event.key.keysym.scancode == SDL_SCANCODE_2)      state.hotkey = Hotkey::LEVEL_2;
