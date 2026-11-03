@@ -140,7 +140,7 @@ struct RouteManifest {
         if (route.name.empty()) route.name = route.id;
         for (const auto& link : route.shortcuts) {
             const int from = route.Find(link.first), to = route.Find(link.second);
-            if (from < 0 || to <= from + 1)
+            if (from < 0 || to <= from)
                 throw std::runtime_error("Shortcut must skip forward to an existing stage");
         }
         return route;
