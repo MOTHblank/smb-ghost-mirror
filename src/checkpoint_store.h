@@ -18,6 +18,7 @@ struct PracticeCheckpoint {
     std::string player_state, pb_state, tas_state;
     std::string recorder_start_state;
     std::vector<sta::nes::ControllerState> recorder_inputs;
+    std::vector<sta::nes::ControllerState> pb_inputs, tas_inputs;
     int frame = 0, pb_frame = 0, tas_frame = 0;
     int prev_world = -1, prev_level = -1;
     bool recorder_active = false, level_loading = false;
@@ -61,12 +62,15 @@ struct CheckpointStore {
         try {
             if (cp.profile_key.empty() || cp.stage.empty() || cp.player_state.empty() ||
                 cp.pb_state.empty() || cp.tas_state.empty() ||
-                cp.recorder_inputs.size() > 1000000 || cp.frame < 0 ||
-                cp.pb_frame < 0 || cp.tas_frame < 0) return false;
+                cp.recorder_inputs.size() > 1000000 ||
+                cp.pb_inputs.size() > 1000000 || cp.tas_inputs.size() > 1000000 ||
+                cp.frame < 0 || cp.pb_frame < 0 || cp.tas_frame < 0 ||
+                static_cast<size_t>(cp.pb_frame) > cp.pb_inputs.size() ||
+                static_cast<size_t>(cp.tas_frame) > cp.tas_inputs.size()) return false;
             const std::string path = Path(profile_dir, cp.stage, slot);
             std::filesystem::create_directories(std::filesystem::path(path).parent_path());
             return AtomicWriteFile(path, [&](std::ostream& os) {
-                os.write("GMCP3", 5);
+                os.write("GMCP4", 5);
                 String(os, cp.profile_key);
                 String(os, cp.stage);
                 Number(os, static_cast<uint32_t>(cp.frame));
@@ -82,6 +86,10 @@ struct CheckpointStore {
                 String(os, cp.recorder_start_state);
                 Number(os, static_cast<uint32_t>(cp.recorder_inputs.size()));
                 for (auto c : cp.recorder_inputs) os.put(static_cast<char>(c));
+                Number(os, static_cast<uint32_t>(cp.pb_inputs.size()));
+                for (auto c : cp.pb_inputs) os.put(static_cast<char>(c));
+                Number(os, static_cast<uint32_t>(cp.tas_inputs.size()));
+                for (auto c : cp.tas_inputs) os.put(static_cast<char>(c));
             });
         } catch (const std::exception& e) {
             std::cerr << "ERROR saving checkpoint: " << e.what() << std::endl;
@@ -96,7 +104,7 @@ struct CheckpointStore {
             if (!is) return false;
             char magic[5];
             is.read(magic, sizeof magic);
-            if (!is || std::string(magic, sizeof magic) != "GMCP3") return false;
+            if (!is || std::string(magic, sizeof magic) != "GMCP4") return false;
             PracticeCheckpoint cp;
             cp.profile_key = String(is, 512);
             cp.stage = String(is, 64);
@@ -120,7 +128,15 @@ struct CheckpointStore {
             const auto count = Number(is);
             if (count > 1000000 || count > frame) return false;
             cp.recorder_inputs.resize(count);
-            is.read(reinterpret_cast<char*>(cp.recorder_inputs.data()), count);
+            if (count) is.read(reinterpret_cast<char*>(cp.recorder_inputs.data()), count);
+            const auto pb_count = Number(is);
+            if (pb_count > 1000000 || pb > pb_count) return false;
+            cp.pb_inputs.resize(pb_count);
+            if (pb_count) is.read(reinterpret_cast<char*>(cp.pb_inputs.data()), pb_count);
+            const auto tas_count = Number(is);
+            if (tas_count > 1000000 || tas > tas_count) return false;
+            cp.tas_inputs.resize(tas_count);
+            if (tas_count) is.read(reinterpret_cast<char*>(cp.tas_inputs.data()), tas_count);
             if (!is || is.peek() != EOF || cp.player_state.empty() ||
                 cp.pb_state.empty() || cp.tas_state.empty()) return false;
             *out = std::move(cp);
