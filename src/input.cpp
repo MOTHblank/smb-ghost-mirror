@@ -224,6 +224,8 @@ InputState PollInput() {
             else if (event.key.keysym.scancode == g_keys.hk_restart)   state.hotkey = Hotkey::RESTART_LEVEL;
             else if (event.key.keysym.scancode == g_keys.hk_view_mode) state.hotkey = Hotkey::TOGGLE_VIEW_MODE;
             else if (event.key.keysym.scancode == g_keys.hk_menu)      state.hotkey = Hotkey::TOGGLE_MENU;
+            else if (event.key.keysym.scancode == SDL_SCANCODE_LEFTBRACKET) state.hotkey = Hotkey::CHECKPOINT_PREV;
+            else if (event.key.keysym.scancode == SDL_SCANCODE_RIGHTBRACKET) state.hotkey = Hotkey::CHECKPOINT_NEXT;
 
             // Level quick-jump (1-8 keys)
             else if (event.key.keysym.scancode == SDL_SCANCODE_1)      state.hotkey = Hotkey::LEVEL_1;
