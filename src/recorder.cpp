@@ -3,6 +3,7 @@
 #include <iostream>
 #include "atomic_file.h"
 #include "rom_metadata.h"
+#include "reference_profile.h"
 
 Recorder::Recorder()
     : frame_count(0)
@@ -37,8 +38,8 @@ bool Recorder::SaveFM2(const std::string& path) const {
         return false;
     }
 
-    if (!has_rom_header) {
-        std::cerr << "ERROR: No valid ROM metadata; refusing to save misleading FM2" << std::endl;
+    if (!has_rom_header || profile_key.empty()) {
+        std::cerr << "ERROR: Missing ROM or profile metadata; refusing to save misleading FM2" << std::endl;
         return false;
     }
     sta::nes::FM2Header header = rom_header;
@@ -47,6 +48,8 @@ bool Recorder::SaveFM2(const std::string& path) const {
     std::string comment = "comment ghost-mirror PB for " + level_id +
                           ", " + std::to_string(inputs.size()) + " frames";
     header.additionalLines.push_back(comment);
+    header.additionalLines.push_back(GhostProfileTag(profile_key));
+    header.additionalLines.push_back(GhostStageTag(level_id));
 
     if (!AtomicWriteFile(path, [&](std::ostream& os) {
         sta::nes::WriteFM2File(os, inputs, header);
