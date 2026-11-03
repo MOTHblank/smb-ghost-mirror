@@ -74,43 +74,25 @@ bool EmuTrio::LoadStateString(const std::string& state_data) {
     return true;
 }
 
-bool EmuTrio::LoadPBInputs(const std::string& fm2_path) {
-    std::ifstream ifs(fm2_path);
-    if (!ifs) {
-        // No PB exists yet — that's fine
-        pb_inputs.clear();
+bool EmuTrio::LoadPBInputs(const std::string& path, const ReferenceProfile& profile,
+                           const std::string& stage) {
+    pb_inputs.clear();
+    if (!GhostLoadTaggedReplay(path, profile, stage, &pb_inputs)) {
+        std::cerr << "PB missing or incompatible: " << path << std::endl;
         return false;
     }
-
-    try {
-        sta::nes::ReadFM2File(ifs, &pb_inputs, nullptr);
-    } catch (const std::exception& e) {
-        std::cerr << "WARNING: Failed to parse PB FM2: " << e.what() << std::endl;
-        pb_inputs.clear();
-        return false;
-    }
-
-    std::cout << "PB loaded: " << pb_inputs.size() << " frames from " << fm2_path << std::endl;
+    std::cout << "PB loaded: " << pb_inputs.size() << " frames\n";
     return true;
 }
 
-bool EmuTrio::LoadTASInputs(const std::string& fm2_path) {
-    std::ifstream ifs(fm2_path);
-    if (!ifs) {
-        tas_inputs.clear();
-        std::cerr << "WARNING: No TAS FM2 found: " << fm2_path << std::endl;
+bool EmuTrio::LoadTASInputs(const std::string& path, const ReferenceProfile& profile,
+                            const std::string& stage) {
+    tas_inputs.clear();
+    if (!GhostLoadTaggedReplay(path, profile, stage, &tas_inputs)) {
+        std::cerr << "TAS missing or incompatible: " << path << std::endl;
         return false;
     }
-
-    try {
-        sta::nes::ReadFM2File(ifs, &tas_inputs, nullptr);
-    } catch (const std::exception& e) {
-        std::cerr << "WARNING: Failed to parse TAS FM2: " << e.what() << std::endl;
-        tas_inputs.clear();
-        return false;
-    }
-
-    std::cout << "TAS loaded: " << tas_inputs.size() << " frames from " << fm2_path << std::endl;
+    std::cout << "TAS loaded: " << tas_inputs.size() << " frames\n";
     return true;
 }
 
