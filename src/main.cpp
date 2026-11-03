@@ -375,7 +375,7 @@ int main(int argc, char* argv[]) {
 
     printf("\n=== Ghost Mirror ===\n");
     printf("Controls: Arrows=D-pad, Z=A, X=B, Enter=Start, RShift=Select\n");
-    printf("Hotkeys:  1-8=Level, F5=Quicksave, F9=Quickload, F8=Save PB, F10=Restart, Tab=Toggle View, Esc=Menu\n");
+    printf("Hotkeys:  1-8=Level, [ ]=Checkpoint Slot, F5=Save, F9=Load, F8=Save PB, F10=Restart, Tab=View, Esc=Menu\n");
     printf("Use --split to generate savestates first.\n\n");
 
     // Main loop
@@ -724,7 +724,9 @@ int main(int argc, char* argv[]) {
                     tas_frames.data(),
                     rom_files[rom_file_idx].c_str(),
                     fm2_files[fm2_file_idx].c_str(),
-                    g_reset_player_on_transition
+                    g_reset_player_on_transition,
+                    checkpoint_slot,
+                    route.name.c_str()
                 );
             }
 
