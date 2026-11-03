@@ -462,6 +462,8 @@ int main(int argc, char* argv[]) {
                 cp.pb_frame = trio.pb_frame_idx;
                 cp.tas_frame = trio.tas_frame_idx;
                 cp.recorder_inputs = recorder.inputs;
+                cp.pb_inputs = trio.pb_inputs;
+                cp.tas_inputs = trio.tas_inputs;
                 cp.recorder_start_state = recorder.level_start_state;
                 cp.recorder_active = recorder.active;
                 cp.level_loading = g_level_loading;
@@ -512,6 +514,8 @@ int main(int argc, char* argv[]) {
                     LoadLevel(index);
                     break;
                 }
+                trio.pb_inputs = std::move(cp.pb_inputs);
+                trio.tas_inputs = std::move(cp.tas_inputs);
                 trio.frame = cp.frame;
                 trio.pb_frame_idx = cp.pb_frame;
                 trio.tas_frame_idx = cp.tas_frame;
