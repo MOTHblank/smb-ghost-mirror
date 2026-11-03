@@ -467,6 +467,11 @@ int main(int argc, char* argv[]) {
 
         case Hotkey::QUICKLOAD:
             if (organizer.Ready() && (app_state == AppState::PLAYING || menu_open)) {
+                if (menu_open && (rom_files[rom_file_idx] != g_rom_path ||
+                                  fm2_files[fm2_file_idx] != g_fm2_path)) {
+                    printf("Pending ROM/FM2 selection; press S to apply before loading checkpoints.\n");
+                    break;
+                }
                 const int index = menu_open ? organizer.SelectedIndex() : active_level_idx;
                 PracticeCheckpoint cp;
                 if (!CheckpointStore::Load(organizer.base_dir, organizer.levels[index].name,
@@ -623,8 +628,7 @@ int main(int argc, char* argv[]) {
                 std::string new_fm2 = fm2_files[fm2_file_idx];
                 printf("RE-SPLITTING! ROM: %s, FM2: %s...\n", new_rom.c_str(), new_fm2.c_str());
 
-                // Reset quicksave and discard current recorder
-                        recorder.Discard();
+                // The active game is retained if reference splitting fails.
 
                 // Run splitter
                 int split_res = 1;
@@ -646,6 +650,9 @@ int main(int argc, char* argv[]) {
                         printf("Split & Load Successful!\n");
                     } else {
                         g_rom_loaded = false;
+                        level_active = false;
+                        menu_open = true;
+                        app_state = AppState::MENU;
                         fprintf(stderr, "ERROR: Split completed but profile could not be activated.\n");
                     }
                 } else {
