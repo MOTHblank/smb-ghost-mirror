@@ -113,8 +113,9 @@ The current checkpoint slot is visible in the window title and menu. Each
 stage has up to five persistent checkpoints **per profile**. Save with F5,
 choose slots with Ctrl+1–5 or cycle with the square brackets, and load with F9 while practicing a
 stage; F9 can also load a selected stage's checkpoint from the stage menu.
-The checkpoint includes all three emulator states, frame counters, recorded
-inputs and level-transition synchronization state. Files are replaced
+The checkpoint includes all three emulator states, the matching PB/TAS input
+streams, frame counters, recorded player inputs and level-transition
+synchronization state. Files are replaced
 atomically; invalid or truncated checkpoints are refused.
 
 **Restoring a checkpoint marks the attempt PRACTICE.** Such runs are ineligible
