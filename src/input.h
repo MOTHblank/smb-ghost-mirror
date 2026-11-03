@@ -11,6 +11,8 @@ enum class Hotkey {
     NONE,
     QUICKSAVE,        // F5
     QUICKLOAD,        // F9
+    CHECKPOINT_PREV,  // [
+    CHECKPOINT_NEXT,  // ]
     SAVE_PB,          // F8
     RESTART_LEVEL,    // F10
     TOGGLE_VIEW_MODE, // Tab
