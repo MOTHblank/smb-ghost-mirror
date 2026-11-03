@@ -16,6 +16,7 @@ struct Recorder {
     bool active;
     sta::nes::FM2Header rom_header;
     bool has_rom_header = false;
+    std::string profile_key; // Replay identity, set when a validated profile is activated.
 
     Recorder();
 
