@@ -560,6 +560,9 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
 
         // Draw level name
         std::string lvl_name = level_names[i];
+        const size_t max_chars = static_cast<size_t>(std::max(3, (box_w - 8) / (8 * text_scale)));
+        if (lvl_name.size() > max_chars)
+            lvl_name = lvl_name.substr(0, max_chars - 1) + "~";
         int lvl_w = static_cast<int>(lvl_name.length()) * 8 * text_scale;
         int lvl_y_offset = (scale == 1) ? 4 : 10;
         DrawText(lvl_name, box.x + (box_w - lvl_w) / 2, box.y + lvl_y_offset, text_scale, text_color);
