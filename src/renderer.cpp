@@ -506,8 +506,14 @@ void Renderer::DrawMenu(int selected_index, const char* level_names[], int num_l
     std::string title_text = "SELECT LEVEL - " + std::string(route_name ? route_name : "") +
         "  (" + std::to_string(selected_index / 8 + 1) + "/" +
         std::to_string((num_levels + 7) / 8) + ")";
-    int title_w = static_cast<int>(title_text.length()) * 8 * title_scale;
-    DrawText(title_text, (window_w - title_w) / 2, start_y - (scale == 1 ? 30 : 60), title_scale, title_color);
+    // Fit long custom route names into both full-width and overlay layouts.
+    const size_t max_chars = static_cast<size_t>(std::max(4, (window_w - 16) / 8));
+    if (title_text.size() > max_chars)
+        title_text = title_text.substr(0, max_chars - 3) + "...";
+    const int fitted_scale = std::max(1, std::min(title_scale,
+        (window_w - 16) / std::max(1, static_cast<int>(title_text.size()) * 8)));
+    int title_w = static_cast<int>(title_text.length()) * 8 * fitted_scale;
+    DrawText(title_text, (window_w - title_w) / 2, start_y - (scale == 1 ? 30 : 60), fitted_scale, title_color);
 
     // Calculate Sum of Best (SOB) and Sum of TAS (SOT)
     int sum_pb = 0;
