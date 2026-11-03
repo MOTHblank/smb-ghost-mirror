@@ -252,8 +252,12 @@ int main(int argc, char* argv[]) {
     bool run_assisted = false;
     int checkpoint_slot = 1;
     auto UpdateCaption = [&]() {
-        std::string caption = "Ghost Mirror | Checkpoint " + std::to_string(checkpoint_slot) +
-                              "/5" + (run_assisted ? " | PRACTICE (PB locked)" : "");
+        std::string caption = "Ghost Mirror";
+        if (level_active && active_level_idx < organizer.Count())
+            caption += " | " + organizer.levels[active_level_idx].name +
+                       " | Frame " + std::to_string(trio.frame);
+        caption += " | Checkpoint " + std::to_string(checkpoint_slot) +
+                   "/5" + (run_assisted ? " | PRACTICE (PB locked)" : " | CLEAN");
         SDL_SetWindowTitle(renderer.window, caption.c_str());
     };
     UpdateCaption();
@@ -262,6 +266,11 @@ int main(int argc, char* argv[]) {
     auto LoadLevel = [&](int index) {
         if (index < 0 || index >= organizer.Count() || !organizer.Ready()) {
             fprintf(stderr, "No active compatible reference profile. Split/apply ROM and FM2 first.\n");
+            return false;
+        }
+        if (menu_open && (rom_files[rom_file_idx] != g_rom_path ||
+                          fm2_files[fm2_file_idx] != g_fm2_path)) {
+            fprintf(stderr, "Pending ROM/FM2 selection: press S to apply the selected reference.\n");
             return false;
         }
 
@@ -537,6 +546,17 @@ int main(int argc, char* argv[]) {
             }
             break;
 
+        case Hotkey::CHECKPOINT_SLOT_1:
+        case Hotkey::CHECKPOINT_SLOT_2:
+        case Hotkey::CHECKPOINT_SLOT_3:
+        case Hotkey::CHECKPOINT_SLOT_4:
+        case Hotkey::CHECKPOINT_SLOT_5:
+            checkpoint_slot = static_cast<int>(input.hotkey) -
+                              static_cast<int>(Hotkey::CHECKPOINT_SLOT_1) + 1;
+            printf("Practice checkpoint slot: %d/%d\n", checkpoint_slot, CheckpointStore::SLOTS);
+            UpdateCaption();
+            break;
+
         case Hotkey::CHECKPOINT_PREV:
             checkpoint_slot = (checkpoint_slot + CheckpointStore::SLOTS - 2) %
                               CheckpointStore::SLOTS + 1;
@@ -773,10 +793,15 @@ int main(int argc, char* argv[]) {
 
                     recorder.Finish();
                     SavePB(false);
+                    const bool assisted_before_transition = run_assisted;
 
                     if (g_reset_player_on_transition) {
                         // Reset player directly to next level's start state (skips black screen)
-                        LoadLevel(next_idx);
+                        if (LoadLevel(next_idx)) {
+                            // Loading a new level during an assisted route cannot wash its PB taint.
+                            run_assisted = assisted_before_transition;
+                            UpdateCaption();
+                        }
                     } else {
                         // Play naturally. Retain player state, load PB/TAS ghosts level states and freeze them
                         trio.pb->LoadStateFile(organizer.StatePath(next_idx));
@@ -890,6 +915,8 @@ int main(int argc, char* argv[]) {
                 trio.tas.get(),
                 g_max_level_x
             );
+            // DrawFrame refreshes the window title; keep checkpoint/practice status visible.
+            UpdateCaption();
 
             // Frame timing — maintain NES cadence
             next_frame_time += std::chrono::microseconds(static_cast<int64_t>(FRAME_DURATION_US));
