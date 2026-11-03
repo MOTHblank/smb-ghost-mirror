@@ -1,59 +1,139 @@
 # Ghost Mirror
 
-A standalone practice and learning tool for *Super Mario Bros. 1* speedruns, featuring:
-- Triple-emulator real-time viewports (Player, PB, TAS)
-- Translucent, high-fidelity ghost overlays with world-position accuracy
-- RNG and framerule synchronization for accurate enemy spawns
-- In-game controls configuration and gamepad support
-- Level comparison stats (PB vs. TAS frames, SOB vs. SOT delta)
-- On-the-fly reference ROM/FM2 cycling and splitting
-- No ROM required at launch — select one from the menu
+A standalone *Super Mario Bros. 1* speedrun practice tool featuring:
+- Three synchronized Nestopia instances: Player, personal best and TAS
+- Transparent, world-positioned ghost overlays and frame comparisons
+- RNG and framerule synchronization
+- Data-driven route selection, with Any% Warpless configured by default
+- ROM/TAS/route-isolated savestates, tagged replay files and PB records
+- Five persistent practice checkpoints per stage and reference profile
+- Keyboard/gamepad bindings and a paginated level-selection menu
 
 ## Setup
 
-### 1. ROM File
-Provide your own NTSC Super Mario Bros. ROM.
-Place it in the same folder as the executable, or select it at runtime from the menu (`R` to cycle ROMs).
+### 1. ROM
+Provide your own NTSC Super Mario Bros. ROM. Place it next to the executable,
+pass `--rom <path>`, or use **R** in the menu to choose a ROM in the current directory.
 
-### 2. TAS Reference
-Generate per-level savestates and input segments by running:
+### 2. TAS reference and profile
+Place a matching FM2 movie alongside the executable or pass `--fm2 <path>`.
+The FM2's **ROM checksum must match** the selected ROM. Ghost Mirror refuses to
+split or compare against a mismatched reference.
+
+Split the movie into stages:
+
+```text
+ghost-mirror.exe --split "Super Mario Bros. (World).nes" maru.fm2
 ```
-ghost-mirror.exe --split <rom_path> <fm2_path>
+
+Or choose ROM (**R**) and FM2 (**F**) in the menu and press **S** to split
+and apply. When changing ROM or movie, the newly selected reference must
+be applied with **S** before loading its levels.
+
+The generated files are stored under
+
+```text
+savestates/profiles/<route-id-and-definition>/<rom-checksum>/<tas-content-identity>/
+    profile.txt
+    records.txt
+    1-1.state
+    1-1.tas.fm2
+    1-1.pb.fm2
+    1-1.practice.fm2
+    checkpoints/
+        1-1-1.gmc
+        1-1-2.gmc
+        ...
 ```
-Or press `S` in the menu after selecting ROM and FM2 files.
 
-### 3. Third-Party Dependencies
-This repository does not include third-party dependencies. Place them under `3rd/` before building:
-- **nestopia**: Nestopia emulator core source in `3rd/nestopia/`.
-- **SDL2-Binaries**: SDL2 VC development libraries in `3rd/SDL2-Binaries/`.
+The profile marker and replay tags must match the active ROM, TAS reference,
+route definition and stage. Invalid/missing markers or incompatible replays
+are ignored. PB records are scoped to the same profile, so switching the
+ROM or TAS never silently combines records from different references.
 
-## Building
-1. Ensure CMake and Ninja are installed.
-2. Run `build.bat` from a Visual Studio Developer Command Prompt.
+**Existing unscoped `savestates/*.state` and `*.tas.fm2` files remain
+untouched.** To start using profiles, run **S** (or `--split`) again with the
+original ROM and FM2. Old unscoped PB files cannot be automatically attributed
+to a particular reference and are intentionally not imported.
+
+### 3. Custom routes
+The default manifest is `routes/warpless.route`:
+
+```ini
+id=warpless
+name=SMB1 Any% Warpless
+stage=1-1,1,1
+stage=1-2,1,2
+stage=4-1,4,1
+stage=4-2,4,2
+stage=8-1,8,1
+stage=8-2,8,2
+stage=8-3,8,3
+stage=8-4,8,4
+```
+
+Each `stage` uses `id,world,level` (one-based SMB coordinates). You can
+optionally append `,state_filename,tas_filename,pb_filename` to associate
+custom files, which still live inside that profile's directory. Add
+`shortcut=from-id,to-id` for an allowed forward jump over other stages.
+Normally transitions follow manifest order and detect RAM world/level changes
+at gameplay boundaries. Use `--route path/to/route.route` to select a
+different manifest, including a set of individual-stage practice entries.
+
+```text
+ghost-mirror.exe --route routes/warpless.route --savestates savestates --split myrom.nes mytas.fm2
+ghost-mirror.exe --route routes/warpless.route --rom myrom.nes --fm2 mytas.fm2
+```
+
+Level selections and splits follow the manifest. The menu shows eight stages
+per page, with left/right navigation traversing the entire route. Number keys
+1–8 remain direct shortcuts to the first eight stages.
 
 ## Controls
 
-| Action | Key | Gamepad |
+| Action | Keyboard | Gamepad |
 |---|---|---|
 | D-pad | Arrow keys | D-pad |
 | A / B | Z / X | A / B |
-| Start / Select | Enter / RShift | Start / Back |
-| Load level 1–8 | 1–8 | — |
-| Quicksave / Quickload | F5 / F9 | — |
-| Save PB / export recording | F8 | — |
-| Restart level | F10 | — |
-| Toggle overlay | Tab | — |
-| Menu | Esc | — |
+| Start / Select | Enter / Right Shift | Start / Back |
+| Load stage 1–8 | 1–8 | — |
+| Select checkpoint slot 1–5 | `[` / `]` | — |
+| Save current checkpoint | F5 | Left shoulder |
+| Restore selected checkpoint | F9 | Right shoulder |
+| Export recording / eligible PB | F8 | Y |
+| Restart stage with a clean attempt | F10 | Left stick |
+| Toggle ghost overlay | Tab | Right stick |
+| Open / close menu | Esc | Back |
 | Configure bindings | C (in menu) | Y (in menu) |
 | Cycle ROM / FM2 | R / F (in menu) | — |
-| Re-split | S (in menu) | — |
+| Re-split and apply reference | S (in menu) | — |
 | Toggle transition mode | T (in menu) | — |
 
-PBs are recorded automatically on completed levels. **F8** saves a faster recording as
-the new PB, or exports a slower recording to `savestates/<level>.export.fm2`
-without overwriting the PB. Replay files are written with an atomic replacement;
-`records.txt` is a repairable cache of the replay's frame count.
+The current checkpoint slot is visible in the window title and menu. Each
+stage has up to five persistent checkpoints **per profile**. Save with F5,
+cycle slots with the square brackets, and load with F9 while practicing a
+stage; F9 can also load a selected stage's checkpoint from the stage menu.
+The checkpoint includes all three emulator states, frame counters, recorded
+inputs and level-transition synchronization state. Files are replaced
+atomically; invalid or truncated checkpoints are refused.
+
+**Restoring a checkpoint marks the attempt PRACTICE.** Such runs are ineligible
+for PB promotion, including automatic PB detection at the stage transition.
+F8 exports these inputs to `<stage>.practice.fm2` without changing the PB.
+Restarting the stage with F10 or loading it fresh starts a new clean attempt.
+A normal clean attempt still records PBs automatically on completion. A
+manual slower clean recording goes to `<stage>.export.fm2`.
+
+## Building
+
+This repository does not bundle third-party dependencies. Provide:
+- Nestopia source in `3rd/nestopia/`.
+- SDL2 VC development libraries in `3rd/SDL2-Binaries/`.
+
+Use CMake and Ninja, or run `build.bat` from a Visual Studio Developer
+Command Prompt.
 
 ## Credits
-- Based on the [RetroTournaments/static](https://github.com/RetroTournaments/static) project.
+
+- Based on [RetroTournaments/static](https://github.com/RetroTournaments/static).
 - Reference Warpless TAS movie by Maru.
