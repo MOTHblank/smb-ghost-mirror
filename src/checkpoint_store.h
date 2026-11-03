@@ -2,6 +2,7 @@
 #define GHOST_MIRROR_CHECKPOINT_STORE_H
 
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
